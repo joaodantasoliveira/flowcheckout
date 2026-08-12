@@ -1,0 +1,78 @@
+#!/bin/sh
+#
+# Bloqueia commits que contenham segredos.
+#
+# O .gitignore já mantém o .env fora do git. Este hook é a segunda camada,
+# para o caso de alguém rodar `git add -f`, renomear o arquivo, ou colar uma
+# chave dentro de um arquivo de código.
+#
+# Ative com:  npm run hooks:install
+# Pular (só se souber o que está fazendo):  git commit --no-verify
+
+RED=$(printf '\033[31m')
+YELLOW=$(printf '\033[33m')
+RESET=$(printf '\033[0m')
+
+fail() {
+  echo ""
+  echo "${RED}COMMIT BLOQUEADO${RESET} — $1"
+  echo ""
+  echo "$2"
+  echo ""
+  echo "${YELLOW}Se for falso positivo:${RESET} git commit --no-verify"
+  echo ""
+  exit 1
+}
+
+# ---------------------------------------------------------------
+# 1. Arquivos de ambiente nunca entram
+# ---------------------------------------------------------------
+ENV_FILES=$(git diff --cached --name-only --diff-filter=ACM |
+  grep -E '(^|/)\.env($|\.)' |
+  grep -v '\.env\.example$')
+
+if [ -n "$ENV_FILES" ]; then
+  fail "arquivo de ambiente no commit" "$ENV_FILES
+
+Esses arquivos guardam credenciais. Remova do staging:
+  git reset HEAD <arquivo>"
+fi
+
+# ---------------------------------------------------------------
+# 2. Valores que parecem credenciais reais
+#
+# Os padrões exigem um valor longo depois do sinal de igual, para
+# não disparar em placeholders (SUPABASE_SECRET_KEY=sb_secret_...)
+# nem em texto de documentação.
+# ---------------------------------------------------------------
+DIFF=$(git diff --cached -U0 --diff-filter=ACM | grep '^+' | grep -v '^+++')
+
+check() {
+  MATCH=$(printf '%s\n' "$DIFF" | grep -oE "$1" | head -3)
+  if [ -n "$MATCH" ]; then
+    fail "$2" "Trecho encontrado:
+$(printf '%s\n' "$MATCH" | sed 's/^/  /')"
+  fi
+}
+
+# Chave secreta do Supabase (formato novo)
+check 'sb_secret_[A-Za-z0-9_-]{16,}' "chave secreta do Supabase no código"
+
+# JWT com papel service_role (formato legado)
+check 'eyJ[A-Za-z0-9_-]{20,}\.eyJ[A-Za-z0-9_-]{40,}\.[A-Za-z0-9_-]{20,}' \
+  "JWT do Supabase no código"
+
+# Variáveis sensíveis com valor real preenchido
+check 'SUPABASE_SECRET_KEY[[:space:]]*=[[:space:]]*[A-Za-z0-9_.-]{20,}' \
+  "SUPABASE_SECRET_KEY com valor preenchido"
+
+check 'APP_ENCRYPTION_KEY[[:space:]]*=[[:space:]]*[A-Za-z0-9+/]{40,}=*' \
+  "APP_ENCRYPTION_KEY com valor preenchido"
+
+check '(WEBHOOK_TOKEN|CRON_SECRET)[[:space:]]*=[[:space:]]*[a-f0-9]{32,}' \
+  "token secreto com valor preenchido"
+
+check 'MISTICPAY_(CI|CS)[[:space:]]*=[[:space:]]*[A-Za-z0-9_-]{16,}' \
+  "credencial da MisticPay no código"
+
+exit 0

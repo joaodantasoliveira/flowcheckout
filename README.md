@@ -175,6 +175,26 @@ Não existe "esqueci minha senha" — de propósito, já que fluxo de recuperaç
 e-mail é o caminho mais comum para invadir painel. Perdeu a chave 2FA, rode
 `npm run admin:create` com o mesmo usuário e confirme com `SIM`.
 
+### Segredos fora do repositório
+
+Duas camadas:
+
+1. **`.gitignore`** mantém `.env` fora do git.
+2. **Hook de pre-commit** ([.githooks/pre-commit](.githooks/pre-commit)) bloqueia o
+   commit se um segredo escapar — inclusive por `git add -f`, arquivo renomeado, ou
+   chave colada dentro de um `.js`. Detecta chave secreta do Supabase, JWT
+   `service_role`, `APP_ENCRYPTION_KEY`, `WEBHOOK_TOKEN`, `CRON_SECRET` e credenciais
+   da MisticPay com valor real preenchido.
+
+O hook não é instalado automaticamente ao clonar (o git não permite, por segurança).
+Depois de clonar, rode:
+
+```bash
+npm run hooks:install
+```
+
+Para pular num caso legítimo: `git commit --no-verify`.
+
 ### Endurecendo mais
 
 1. **`ADMIN_IP_ALLOWLIST` é a defesa mais forte** disponível aqui. Se tem IP fixo
