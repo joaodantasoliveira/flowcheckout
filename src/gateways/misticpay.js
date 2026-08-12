@@ -1,4 +1,5 @@
 import { config } from '../config.js';
+import { buildQrCode } from '../qrcode.js';
 import { GatewayError } from './errors.js';
 
 /**
@@ -145,11 +146,17 @@ export const misticpay = {
       });
     }
 
+    // A MisticPay costuma mandar a imagem pronta. Quando não manda, montamos
+    // a partir do copia e cola — o cliente não fica sem QR por isso.
+    const temImagem = tx.qrCodeBase64 || tx.qrcodeUrl;
+    const qr = temImagem
+      ? { qrCodeBase64: tx.qrCodeBase64 || null, qrcodeUrl: tx.qrcodeUrl || null }
+      : await buildQrCode(tx.copyPaste);
+
     return {
       gatewayTransactionId: String(tx.transactionId),
       copyPaste: tx.copyPaste || null,
-      qrCodeBase64: tx.qrCodeBase64 || null,
-      qrcodeUrl: tx.qrcodeUrl || null,
+      ...qr,
     };
   },
 

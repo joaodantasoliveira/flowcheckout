@@ -155,10 +155,15 @@ Dois integrados, escolhidos na aba **Configurações** do painel:
 | **MisticPay** | headers `ci`/`cs` a cada requisição | vem pronto do gateway |
 | **SyncPay** | `client_id`/`client_secret` trocados por Bearer token de 1 h (cacheado) | só o copia e cola; o QR é gerado aqui |
 
-A SyncPay devolve apenas o `pix_code`. Geramos a imagem localmente com a
-biblioteca `qrcode` em vez de chamar um serviço externo de QR — mandar o código
-Pix do comprador para um terceiro só para desenhar um quadrado é risco sem
-contrapartida.
+A SyncPay devolve apenas o `pix_code`. A imagem do QR vem do `api.qrserver.com`
+(mesmo serviço que a MisticPay usa no campo `qrcodeUrl` dela). Quem baixa é o
+navegador do cliente, então o código Pix passa por esse serviço — ele não move
+dinheiro sozinho, só identifica a cobrança, mas é um dado da transação saindo
+para um terceiro.
+
+Se preferir manter tudo interno, ponha `QRCODE_PROVIDER=local` no ambiente: a
+imagem passa a ser gerada no servidor pela biblioteca `qrcode`, sem chamada
+externa. Ver [src/qrcode.js](src/qrcode.js).
 
 **Trocar o gateway ativo afeta só as cobranças novas.** Cada pedido guarda em
 `orders.gateway` quem o processou, e continua sendo conferido lá. Sem isso, uma

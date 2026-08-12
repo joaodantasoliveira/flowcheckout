@@ -1,5 +1,4 @@
-import QRCode from 'qrcode';
-
+import { buildQrCode } from '../qrcode.js';
 import { GatewayError } from './errors.js';
 
 /**
@@ -221,24 +220,13 @@ export const syncpay = {
       });
     }
 
-    // A SyncPay não devolve imagem: desenhamos o QR aqui mesmo.
-    let qrCodeBase64 = null;
-    try {
-      qrCodeBase64 = await QRCode.toDataURL(pixCode, {
-        errorCorrectionLevel: 'M',
-        margin: 1,
-        width: 320,
-      });
-    } catch (err) {
-      // Sem imagem o cliente ainda paga pelo copia e cola.
-      console.error('[syncpay] falha ao gerar QR Code:', err.message);
-    }
+    // A SyncPay devolve só o texto do Pix; a imagem vem do serviço de QR.
+    const qr = await buildQrCode(pixCode);
 
     return {
       gatewayTransactionId: String(identifier),
       copyPaste: pixCode,
-      qrCodeBase64,
-      qrcodeUrl: null,
+      ...qr,
     };
   },
 
