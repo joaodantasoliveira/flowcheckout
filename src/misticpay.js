@@ -113,7 +113,15 @@ export function createPixTransaction({
     payload.splitTax = config.split.tax;
   }
 
-  return request('POST', '/transactions/create', { body: payload });
+  // Orcamento de tempo apertado de proposito: a funcao da Vercel e cortada
+  // em 30s. Com o padrao (20s x 3 tentativas) uma falha do gateway estouraria
+  // o limite e o cliente veria a pagina travar em vez de uma mensagem.
+  // 12s x 2 tentativas cabe com folga.
+  return request('POST', '/transactions/create', {
+    body: payload,
+    timeoutMs: 12000,
+    retries: 1,
+  });
 }
 
 /** POST /transactions/check — fonte da verdade sobre o status. */
