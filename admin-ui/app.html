@@ -107,39 +107,30 @@
 
   <!-- ================= CONFIGURAÇÕES ================= -->
   <section class="view" data-view="settings">
+    <p class="hint hint--warn" id="gw-warning" hidden></p>
+
     <div class="panel">
       <div class="panel__head">
-        <h2 class="panel__title">Credenciais da MisticPay</h2>
-        <span class="pill" id="gw-source"></span>
+        <h2 class="panel__title">Gateway de pagamento</h2>
       </div>
+      <div class="form-panel form-panel--wide">
+        <p class="hint">
+          O gateway ativo processa todas as <strong>novas</strong> cobranças. Pedidos já
+          emitidos continuam sendo conferidos no gateway que os criou.
+        </p>
+        <div class="gw-picker" id="gw-picker"></div>
+      </div>
+    </div>
 
+    <div id="gw-cards"></div>
+
+    <div class="panel">
+      <div class="panel__head">
+        <h2 class="panel__title">Criptografia dos segredos</h2>
+      </div>
       <div class="form-panel">
-        <p class="hint" id="gw-warning" hidden></p>
-
-        <form id="gateway-form" autocomplete="off">
-          <label class="lbl" for="gw-ci">Client ID (<code>ci</code>)</label>
-          <input class="inp" id="gw-ci" spellcheck="false" autocomplete="off" />
-
-          <label class="lbl" for="gw-cs">Client Secret (<code>cs</code>)</label>
-          <input class="inp" id="gw-cs" type="password" spellcheck="false"
-                 autocomplete="new-password" placeholder="" />
-          <p class="hint" id="gw-cs-hint"></p>
-
-          <p class="modal__error" id="gw-error" hidden></p>
-          <p class="ok-box" id="gw-ok" hidden></p>
-
-          <div class="form-actions">
-            <button type="button" class="btn btn--ghost" id="gw-test">Testar conexão</button>
-            <button type="submit" class="btn" id="gw-save">Salvar credenciais</button>
-          </div>
-        </form>
-
-        <hr class="rule" />
-
         <dl class="dl">
-          <dt>Endpoint</dt><dd class="mono" id="gw-base"></dd>
-          <dt>Última alteração</dt><dd id="gw-updated">—</dd>
-          <dt>Criptografia</dt><dd id="gw-enc">—</dd>
+          <dt>Estado</dt><dd id="gw-enc">—</dd>
         </dl>
       </div>
     </div>

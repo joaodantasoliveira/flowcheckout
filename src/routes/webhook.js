@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 import { Router } from 'express';
 
 import { config } from '../config.js';
+import { getGateway } from '../gateways/index.js';
 import { syncOrderWithGateway } from '../orders.js';
 import { getOrder, getOrderByGatewayId, updateOrder } from '../store.js';
 
@@ -15,75 +16,73 @@ function tokenIsValid(received) {
 }
 
 /**
- * POST /api/webhooks/misticpay/:token
+ * POST /api/webhooks/:gateway/:token
  *
- * A MisticPay nao documenta assinatura HMAC nos webhooks, entao usamos duas
- * defesas: (1) um token secreto no caminho da URL e (2) — o que realmente
- * importa — o corpo do webhook NUNCA aprova um pedido sozinho. Ele apenas
- * dispara uma consulta a /transactions/check, que e a fonte da verdade.
- * Assim, mesmo que alguem descubra a URL, nao consegue liberar um pedido
- * que nao foi pago de fato.
+ * Nenhum gateway integrado documenta assinatura HMAC nos webhooks, entao
+ * usamos duas defesas: (1) um token secreto no caminho da URL e (2) — o que
+ * realmente importa — o corpo do webhook NUNCA aprova um pedido sozinho. Ele
+ * apenas dispara uma consulta ao gateway, que e a fonte da verdade. Assim,
+ * mesmo que alguem descubra a URL, nao consegue liberar um pedido que nao
+ * foi pago de fato.
+ *
+ * A SyncPay corta o webhook em 5 segundos, entao respondemos primeiro e
+ * processamos depois — ao contrario da MisticPay, que espera.
  */
-webhookRouter.post('/misticpay/:token', async (req, res) => {
-  if (!tokenIsValid(req.params.token)) {
-    console.warn('[webhook] token inválido, origem:', req.ip);
+webhookRouter.post('/:gateway/:token', async (req, res) => {
+  const gateway = getGateway(req.params.gateway);
+
+  if (!gateway || !tokenIsValid(req.params.token)) {
+    console.warn(`[webhook] rejeitado (${req.params.gateway}), origem: ${req.ip}`);
     return res.status(404).json({ error: 'Não encontrado.' });
   }
 
   const payload = req.body || {};
+  const rapido = gateway.id === 'syncpay';
 
-  // Em serverless o processo pode ser congelado assim que a resposta sai,
-  // entao processamos ANTES de responder. O gateway espera alguns segundos
-  // a mais, mas nada se perde.
+  // Timeout curto do gateway: confirma o recebimento antes de processar.
+  if (rapido) res.status(200).json({ received: true });
+
   try {
-    if (payload.event === 'INFRACTION') {
-      await handleInfraction(payload);
-    } else {
-      await handleTransaction(payload);
-    }
+    const event = gateway.parseWebhook(payload);
+    if (event) await handleEvent(gateway, event);
   } catch (err) {
-    console.error('[webhook] erro ao processar:', err);
+    console.error(`[webhook] erro ao processar (${gateway.id}):`, err);
   }
 
-  res.status(200).json({ received: true });
+  if (!rapido) res.status(200).json({ received: true });
 });
 
-async function handleTransaction(payload) {
-  const gatewayId = payload.transactionId;
-  if (!gatewayId) return;
+async function handleEvent(gateway, event) {
+  if (event.kind === 'infraction') return handleInfraction(event);
 
-  const type = String(payload.transactionType || '').toUpperCase();
-  if (type && type !== 'DEPOSITO') {
-    console.log(`[webhook] ${type} ${gatewayId} status=${payload.status} (ignorado no checkout)`);
-    return;
-  }
-
-  const order = await getOrderByGatewayId(gatewayId);
+  const order = await getOrderByGatewayId(event.gatewayTransactionId);
   if (!order) {
-    console.warn(`[webhook] transação ${gatewayId} sem pedido correspondente.`);
+    console.warn(
+      `[webhook] transação ${gateway.id}:${event.gatewayTransactionId} sem pedido correspondente.`
+    );
     return;
   }
 
-  const status = String(payload.status || '').toUpperCase();
-  console.log(`[webhook] pedido ${order.id} -> ${status}`);
+  console.log(`[webhook] pedido ${order.id} -> ${event.status}`);
 
-  if (status === 'COMPLETO') {
+  if (event.status === 'COMPLETO') {
     // Confirmacao independente antes de liberar qualquer coisa.
     await syncOrderWithGateway(order, { force: true });
 
     const fresh = await getOrder(order.id);
     if (!fresh?.paid) {
       console.warn(
-        `[webhook] ${gatewayId} anunciou COMPLETO mas a consulta não confirmou. Pedido segue pendente.`
+        `[webhook] ${event.gatewayTransactionId} anunciou COMPLETO mas a consulta não ` +
+          'confirmou. Pedido segue pendente.'
       );
-    } else if (payload.e2e && !fresh.endToEndId) {
-      await updateOrder(fresh, { endToEndId: payload.e2e });
+    } else if (event.endToEndId && !fresh.endToEndId) {
+      await updateOrder(fresh, { endToEndId: event.endToEndId });
     }
     return;
   }
 
-  if (['FALHA', 'CANCELADO'].includes(status) && !order.paid) {
-    await updateOrder(order, { status });
+  if (['FALHA', 'CANCELADO'].includes(event.status) && !order.paid) {
+    await updateOrder(order, { status: event.status });
   }
 }
 
@@ -91,31 +90,21 @@ async function handleTransaction(payload) {
  * MED (Mecanismo Especial de Devolucao): contestacao de um PIX ja recebido.
  * Registre e trate manualmente — o prazo de defesa e curto.
  */
-async function handleInfraction(payload) {
-  const { infraction = {}, transaction = {} } = payload;
+async function handleInfraction(event) {
+  const { infraction } = event;
 
   console.warn(
     `[MED] infração ${infraction.id} status=${infraction.status} tipo=${infraction.type} ` +
-      `valor=${infraction.amount} transação=${transaction.transactionId} e2e=${transaction.endToEndId}`
+      `valor=${infraction.amount} transação=${event.gatewayTransactionId}`
   );
 
   if (infraction.status === 'WAITING_PSP') {
     console.warn(
       `[MED] AÇÃO NECESSÁRIA: envie defesa em POST /api/meds/infractions/${infraction.id}/defense ` +
-        `(uma única tentativa por infração).`
+        '(uma única tentativa por infração).'
     );
   }
 
-  const order = await getOrderByGatewayId(transaction.transactionId);
-  if (!order) return;
-
-  await updateOrder(order, {
-    infraction: {
-      id: infraction.id,
-      status: infraction.status,
-      type: infraction.type,
-      amount: infraction.amount,
-      analysisResult: infraction.analysisResult || null,
-    },
-  });
+  const order = await getOrderByGatewayId(event.gatewayTransactionId);
+  if (order) await updateOrder(order, { infraction });
 }

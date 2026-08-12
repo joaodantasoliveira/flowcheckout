@@ -1,10 +1,11 @@
 import { Router } from 'express';
 
 import { config } from '../config.js';
-import { createPixTransaction, MisticPayError } from '../misticpay.js';
+import { GatewayError } from '../gateways/index.js';
 import { publicOrder, syncOrderWithGateway } from '../orders.js';
 import { defaultProductId, formatBRL, getActiveProduct } from '../products.js';
 import { rateLimit } from '../rate-limit.js';
+import { getActiveGateway } from '../settings.js';
 import { createOrder, getOrder, linkGatewayId, updateOrder } from '../store.js';
 import { validateCheckoutPayload } from '../validators.js';
 
@@ -33,7 +34,7 @@ checkoutRouter.get('/product', async (req, res, next) => {
       amountCents: product.priceCents,
       amountFormatted: formatBRL(product.priceCents),
       maxInstallments: product.maxInstallments,
-      // O gateway MisticPay processa apenas PIX.
+      // Ambos os gateways integrados processam apenas PIX.
       methods: { pix: true, card: false },
     });
   } catch (err) {
@@ -41,7 +42,7 @@ checkoutRouter.get('/product', async (req, res, next) => {
   }
 });
 
-/** Gera a cobranca PIX. */
+/** Gera a cobranca PIX no gateway ativo. */
 checkoutRouter.post('/pix', createLimiter, async (req, res, next) => {
   let order = null;
 
@@ -55,6 +56,10 @@ checkoutRouter.post('/pix', createLimiter, async (req, res, next) => {
       return res.status(422).json({ error: 'Revise os dados informados.', fields: errors });
     }
 
+    // Resolve o gateway ANTES de criar o pedido: sem credencial não adianta
+    // gravar uma linha que nunca vai virar cobrança.
+    const { gateway, credentials } = await getActiveGateway();
+
     // O preco vem do catalogo no banco, nunca do corpo da requisicao.
     const amountCents = product.priceCents;
 
@@ -62,49 +67,49 @@ checkoutRouter.post('/pix', createLimiter, async (req, res, next) => {
       product,
       customer: data,
       amountCents,
+      gateway: gateway.id,
       ip: req.ip,
       userAgent: req.get('user-agent') || null,
     });
 
-    const response = await createPixTransaction({
-      amount: Number((amountCents / 100).toFixed(2)),
-      payerName: data.name,
-      payerDocument: data.document,
-      transactionId: order.reference,
+    const charge = await gateway.createPixCharge(credentials, {
+      amountCents,
+      customer: data,
+      reference: order.reference,
       description: `${product.name} - pedido ${order.id}`,
-      projectWebhook: `${config.publicUrl}/api/webhooks/misticpay/${config.webhookToken}`,
+      webhookUrl: `${config.publicUrl}/api/webhooks/${gateway.id}/${config.webhookToken}`,
     });
 
-    const tx = response?.data;
-    if (!tx?.transactionId || !(tx.copyPaste || tx.qrCodeBase64)) {
-      throw new MisticPayError('Resposta inesperada do gateway ao gerar o PIX.', {
-        status: 502,
-        body: response,
-      });
-    }
-
-    await linkGatewayId(order, tx.transactionId);
+    await linkGatewayId(order, charge.gatewayTransactionId);
     order = await updateOrder(order, {
       pix: {
-        qrCodeBase64: tx.qrCodeBase64 || null,
-        qrcodeUrl: tx.qrcodeUrl || null,
-        copyPaste: tx.copyPaste || null,
+        qrCodeBase64: charge.qrCodeBase64,
+        qrcodeUrl: charge.qrcodeUrl,
+        copyPaste: charge.copyPaste,
         expiresAt: Date.now() + config.pixTtlSeconds * 1000,
       },
     });
 
     console.log(
-      `[pedido] criado id=${order.id} gateway=${tx.transactionId} valor=${(amountCents / 100).toFixed(2)}`
+      `[pedido] criado id=${order.id} gateway=${gateway.id}:${charge.gatewayTransactionId} ` +
+        `valor=${(amountCents / 100).toFixed(2)}`
     );
 
     res.status(201).json(publicOrder(order));
   } catch (err) {
     if (order) await updateOrder(order, { status: 'FALHA' }).catch(() => {});
 
-    const isGateway = err instanceof MisticPayError;
-    console.error('[pedido] falha ao gerar PIX:', err.message, err.body || '');
+    // Gateway sem credencial configurada: erro de operação, não do cliente.
+    if (err.status === 503) {
+      console.error('[pedido] gateway não configurado:', err.message);
+      return res.status(503).json({
+        error: 'Pagamento indisponível no momento. Tente novamente em instantes.',
+      });
+    }
 
-    if (!isGateway) return next(err);
+    if (!(err instanceof GatewayError)) return next(err);
+
+    console.error('[pedido] falha ao gerar PIX:', err.message, err.body || '');
 
     res.status(err.status === 401 ? 500 : 502).json({
       error:

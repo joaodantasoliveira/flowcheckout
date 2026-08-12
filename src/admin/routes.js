@@ -4,8 +4,14 @@ import { fileURLToPath } from 'node:url';
 import express, { Router } from 'express';
 
 import { audit, listAudit } from '../audit.js';
-import { getBalance, testCredentials } from '../misticpay.js';
-import { getGatewayCredentials, getGatewayStatus, saveGatewayCredentials } from '../settings.js';
+import { getGateway } from '../gateways/index.js';
+import {
+  getActiveGateway,
+  getCredentials,
+  getGatewaysStatus,
+  saveCredentials,
+  setActiveGateway,
+} from '../settings.js';
 import { syncOrderWithGateway } from '../orders.js';
 import {
   createProduct,
@@ -237,19 +243,6 @@ adminRouter.get(
   })
 );
 
-/** Saldo disponivel na MisticPay. Rota separada: depende de rede e pode falhar. */
-adminRouter.get(
-  '/api/balance',
-  wrap(async (req, res) => {
-    try {
-      const response = await getBalance();
-      res.json({ balance: response?.data?.balance ?? null });
-    } catch {
-      res.status(502).json({ error: 'Não foi possível consultar o saldo agora.' });
-    }
-  })
-);
-
 /* ---------------- produtos ---------------- */
 
 adminRouter.get(
@@ -445,58 +438,105 @@ adminRouter.get(
   })
 );
 
-/* ---------------- configurações do gateway ---------------- */
+/* ---------------- gateways de pagamento ---------------- */
 
 adminRouter.get(
-  '/api/settings/gateway',
-  wrap(async (req, res) => res.json(await getGatewayStatus()))
+  '/api/gateways',
+  wrap(async (req, res) => res.json(await getGatewaysStatus()))
+);
+
+/** Troca o gateway ativo. Só permite se ele responder com as credenciais salvas. */
+adminRouter.put(
+  '/api/gateways/active',
+  wrap(async (req, res) => {
+    const gatewayId = String(req.body?.gateway || '').trim();
+    const gateway = getGateway(gatewayId);
+    if (!gateway) return res.status(422).json({ error: 'Gateway desconhecido.' });
+
+    const resolved = await getCredentials(gatewayId);
+    if (!resolved) {
+      return res.status(422).json({
+        error: `Cadastre as credenciais da ${gateway.label} antes de ativá-la.`,
+      });
+    }
+
+    // Ativar um gateway que não responde derrubaria todas as vendas de uma vez.
+    try {
+      await gateway.testCredentials(resolved.credentials);
+    } catch (err) {
+      return res.status(400).json({
+        error: `A ${gateway.label} recusou as credenciais salvas: ${err.message}. Gateway não trocado.`,
+      });
+    }
+
+    await setActiveGateway(gatewayId, req.admin.id);
+    await audit('gateway.ativo_alterado', {
+      adminId: req.admin.id,
+      ip: req.ip,
+      detail: { gateway: gatewayId },
+    });
+
+    res.json({ ok: true, ...(await getGatewaysStatus()) });
+  })
 );
 
 /**
- * Testa um par de credenciais sem gravar.
- * Chave errada nao chega ao banco e nao derruba as vendas em andamento.
+ * Campo secreto em branco significa "mantenha o atual" — assim dá para
+ * corrigir só o Client ID sem redigitar o segredo.
  */
-/**
- * Client Secret em branco significa "mantenha o atual" — assim da para
- * corrigir so o Client ID sem precisar redigitar o secret.
- */
-async function resolveCredentialInput(body) {
-  const ci = String(body?.ci || '').trim();
-  const typedCs = String(body?.cs || '').trim();
+async function resolveFields(gateway, body) {
+  const current = (await getCredentials(gateway.id))?.credentials || {};
+  const values = {};
+  let reusedSecret = false;
 
-  if (typedCs) return { ci, cs: typedCs, reusedSecret: false };
+  for (const field of gateway.credentialFields) {
+    const typed = String(body?.[field.key] ?? '').trim();
 
-  const current = await getGatewayCredentials();
-  return { ci, cs: current.cs || '', reusedSecret: true };
+    if (typed) {
+      values[field.key] = typed;
+    } else if (field.secret && current[field.key]) {
+      values[field.key] = current[field.key];
+      reusedSecret = true;
+    } else {
+      values[field.key] = '';
+    }
+  }
+
+  const missing = gateway.credentialFields.filter((f) => !values[f.key]).map((f) => f.label);
+
+  return { values, missing, reusedSecret };
 }
 
+/** Testa credenciais sem gravar: chave errada não chega ao banco. */
 adminRouter.post(
-  '/api/settings/gateway/test',
+  '/api/gateways/:id/test',
   wrap(async (req, res) => {
-    const { ci, cs } = await resolveCredentialInput(req.body);
+    const gateway = getGateway(req.params.id);
+    if (!gateway) return res.status(404).json({ error: 'Gateway desconhecido.' });
 
-    if (!ci || !cs) {
-      return res.status(422).json({ error: 'Informe o Client ID e o Client Secret.' });
+    const { values, missing } = await resolveFields(gateway, req.body);
+    if (missing.length) {
+      return res.status(422).json({ error: `Informe: ${missing.join(', ')}.` });
     }
 
     try {
-      const account = await testCredentials({ ci, cs });
+      const account = await gateway.testCredentials(values);
       await audit('gateway.credenciais_testadas', {
         adminId: req.admin.id,
         ip: req.ip,
-        detail: { ok: true },
+        detail: { gateway: gateway.id, ok: true },
       });
       res.json({ ok: true, account });
     } catch (err) {
       await audit('gateway.credenciais_testadas', {
         adminId: req.admin.id,
         ip: req.ip,
-        detail: { ok: false },
+        detail: { gateway: gateway.id, ok: false },
       });
       res.status(400).json({
         error:
           err.status === 401
-            ? 'A MisticPay recusou essas credenciais.'
+            ? `A ${gateway.label} recusou essas credenciais.`
             : `Não foi possível validar: ${err.message}`,
       });
     }
@@ -504,29 +544,31 @@ adminRouter.post(
 );
 
 adminRouter.put(
-  '/api/settings/gateway',
+  '/api/gateways/:id/credentials',
   wrap(async (req, res) => {
-    const { ci, cs, reusedSecret } = await resolveCredentialInput(req.body);
+    const gateway = getGateway(req.params.id);
+    if (!gateway) return res.status(404).json({ error: 'Gateway desconhecido.' });
 
-    if (!ci || !cs) {
-      return res.status(422).json({ error: 'Informe o Client ID e o Client Secret.' });
+    const { values, missing, reusedSecret } = await resolveFields(gateway, req.body);
+    if (missing.length) {
+      return res.status(422).json({ error: `Informe: ${missing.join(', ')}.` });
     }
 
-    // Só grava o que a MisticPay aceitou. Salvar chave inválida deixaria a
-    // loja sem conseguir gerar PIX até alguém perceber.
+    // Só grava o que o gateway aceitou. Salvar chave inválida deixaria a loja
+    // sem conseguir gerar PIX até alguém perceber.
     try {
-      await testCredentials({ ci, cs });
+      await gateway.testCredentials(values);
     } catch (err) {
       return res.status(400).json({
         error:
           err.status === 401
-            ? 'A MisticPay recusou essas credenciais. Nada foi salvo.'
-            : `Não foi possível validar as credenciais: ${err.message}. Nada foi salvo.`,
+            ? `A ${gateway.label} recusou essas credenciais. Nada foi salvo.`
+            : `Não foi possível validar: ${err.message}. Nada foi salvo.`,
       });
     }
 
     try {
-      await saveGatewayCredentials({ ci, cs }, req.admin.id);
+      await saveCredentials(gateway.id, values, req.admin.id);
     } catch (err) {
       return res.status(500).json({ error: err.message });
     }
@@ -535,10 +577,23 @@ adminRouter.put(
       adminId: req.admin.id,
       ip: req.ip,
       // Nunca registramos a credencial em si — só que ela mudou e por quem.
-      detail: { ci, secretTrocado: !reusedSecret },
+      detail: { gateway: gateway.id, secretTrocado: !reusedSecret },
     });
 
-    res.json({ ok: true, ...(await getGatewayStatus()) });
+    res.json({ ok: true, ...(await getGatewaysStatus()) });
+  })
+);
+
+/** Saldo do gateway ativo. Rota separada: depende de rede e pode falhar. */
+adminRouter.get(
+  '/api/gateways/balance',
+  wrap(async (req, res) => {
+    try {
+      const { gateway, credentials } = await getActiveGateway();
+      res.json({ gateway: gateway.id, balance: await gateway.getBalance(credentials) });
+    } catch {
+      res.status(502).json({ error: 'Não foi possível consultar o saldo agora.' });
+    }
   })
 );
 

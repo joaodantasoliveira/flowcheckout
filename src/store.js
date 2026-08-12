@@ -15,6 +15,9 @@ export const fromRow = (row) =>
   row && {
     id: row.id,
     reference: row.reference,
+    // Qual gateway processou ESTE pedido. Pode não ser o ativo hoje: trocar
+    // de gateway não pode quebrar a conferência das cobranças já emitidas.
+    gateway: row.gateway || 'misticpay',
     gatewayTransactionId: row.gateway_transaction_id,
 
     productId: row.product_id,
@@ -71,12 +74,13 @@ function toRow(patch) {
   return row;
 }
 
-export async function createOrder({ product, customer, amountCents, ip, userAgent }) {
+export async function createOrder({ product, customer, amountCents, gateway, ip, userAgent }) {
   const id = `${Date.now().toString(36)}-${crypto.randomBytes(6).toString('hex')}`;
 
   const row = await dbInsert('orders', {
     id,
     reference: `chk-${id}`,
+    gateway,
     product_id: product.id,
     product_name: product.name,
     amount_cents: amountCents,

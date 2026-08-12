@@ -146,6 +146,35 @@ ruído de scanner automático; quem segura invasor é a camada abaixo:
 | CSV | Campos começando com `=`, `+`, `-` ou `@` são neutralizados (formula injection no Excel). |
 | Banco | RLS ligado **sem policies** em todas as tabelas. A chave publishable não lê nem escreve nada; só a service_role, que vive no servidor. |
 
+### Gateways de pagamento
+
+Dois integrados, escolhidos na aba **Configurações** do painel:
+
+| Gateway | Autenticação | QR Code |
+|---|---|---|
+| **MisticPay** | headers `ci`/`cs` a cada requisição | vem pronto do gateway |
+| **SyncPay** | `client_id`/`client_secret` trocados por Bearer token de 1 h (cacheado) | só o copia e cola; o QR é gerado aqui |
+
+A SyncPay devolve apenas o `pix_code`. Geramos a imagem localmente com a
+biblioteca `qrcode` em vez de chamar um serviço externo de QR — mandar o código
+Pix do comprador para um terceiro só para desenhar um quadrado é risco sem
+contrapartida.
+
+**Trocar o gateway ativo afeta só as cobranças novas.** Cada pedido guarda em
+`orders.gateway` quem o processou, e continua sendo conferido lá. Sem isso, uma
+troca deixaria todo PIX pendente órfão — o sistema perguntaria ao gateway novo
+por uma transação que só existe no antigo.
+
+Duas travas na troca: o painel recusa ativar um gateway sem credenciais, e testa
+as credenciais salvas contra a API antes de efetivar. Ativar um gateway que não
+responde derrubaria todas as vendas de uma vez.
+
+**Para adicionar um terceiro gateway:** escreva um módulo em `src/gateways/` com
+a mesma interface (`testCredentials`, `createPixCharge`, `checkTransaction`,
+`getBalance`, `parseWebhook`, `credentialFields`) e registre em
+[src/gateways/index.js](src/gateways/index.js). Nada mais muda — nem o painel,
+que monta os formulários a partir de `credentialFields`.
+
 ### Credenciais do gateway
 
 Ficam na aba **Configurações** do painel, não no `.env`. Trocar não exige deploy.

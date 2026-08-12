@@ -1,15 +1,13 @@
 import { config } from './config.js';
-import { checkTransaction, MisticPayError } from './misticpay.js';
+import { GatewayError } from './gateways/index.js';
+import { getGatewayForOrder } from './settings.js';
 import { getOrder, markFulfilledOnce, markOrderPaidOnce, updateOrder } from './store.js';
 
-const VALID_STATES = new Set(['PENDENTE', 'COMPLETO', 'FALHA', 'CANCELADO']);
-
 /**
- * A documentacao da MisticPay e ambigua sobre a unidade de `value`:
- * /transactions/check e a listagem devolvem reais (1.12), enquanto o exemplo
- * de create e o webhook mostram centavos (455). Por isso aceitamos as duas
- * leituras — o vinculo forte continua sendo o transactionId, que so nos
- * conhecemos. Divergencia real vira log de alerta, nao aprovacao silenciosa.
+ * A documentacao dos gateways e ambigua sobre a unidade do valor: alguns
+ * devolvem reais (1.12), outros centavos (455). Aceitamos as duas leituras —
+ * o vinculo forte continua sendo o transactionId, que so nos conhecemos.
+ * Divergencia real vira log de alerta, nao aprovacao silenciosa.
  */
 export function amountMatches(reported, expectedCents) {
   if (reported === null || reported === undefined) return true;
@@ -32,7 +30,7 @@ export async function markPaid(orderId, { endToEndId = null, source = 'desconhec
   if (!order) return null; // ja estava pago: outra requisicao ganhou a corrida
 
   console.log(
-    `[pedido] PAGO  id=${order.id} gateway=${order.gatewayTransactionId} ` +
+    `[pedido] PAGO  id=${order.id} gateway=${order.gateway}:${order.gatewayTransactionId} ` +
       `valor=${(order.amountCents / 100).toFixed(2)} origem=${source}`
   );
 
@@ -68,47 +66,59 @@ async function fulfillOrder(order) {
 
 /**
  * Consulta o gateway e atualiza o pedido.
+ *
+ * Usa o gateway que CRIOU o pedido, nao o ativo agora. Depois de trocar de
+ * gateway no painel, as cobrancas antigas continuam sendo confirmadas no
+ * lugar certo.
+ *
  * Respeita `minGatewayPollMs` por pedido para nao estourar o rate limit
- * de 60 req/min da rota /transactions/check.
+ * dos provedores (a MisticPay, por exemplo, permite 60 req/min por IP).
  */
 export async function syncOrderWithGateway(order, { force = false } = {}) {
   if (order.paid || !order.gatewayTransactionId) return order;
 
   if (!force && Date.now() - order.lastGatewayPollAt < config.minGatewayPollMs) return order;
 
+  const resolved = await getGatewayForOrder(order);
+  if (!resolved) {
+    console.error(
+      `[consulta] pedido ${order.id}: credenciais do gateway "${order.gateway}" indisponíveis.`
+    );
+    return order;
+  }
+
   await updateOrder(order, { lastGatewayPollAt: Date.now() });
 
   try {
-    const response = await checkTransaction(order.gatewayTransactionId);
-    const tx = response?.transaction;
-    if (!tx) return order;
+    const result = await resolved.gateway.checkTransaction(
+      resolved.credentials,
+      order.gatewayTransactionId
+    );
+    if (!result?.status) return order;
 
-    const state = String(tx.transactionState || '').toUpperCase();
-    if (!VALID_STATES.has(state)) return order;
-
-    if (state === 'COMPLETO') {
-      if (!amountMatches(tx.value, order.amountCents)) {
+    if (result.status === 'COMPLETO') {
+      if (!amountMatches(result.amount, order.amountCents)) {
         console.warn(
           `[alerta] valor divergente no pedido ${order.id}: ` +
-            `gateway=${tx.value} esperado=${order.amountCents} centavos. Revisar manualmente.`
+            `gateway=${result.amount} esperado=${order.amountCents} centavos. Revisar manualmente.`
         );
       }
       const paid = await markPaid(order.id, {
-        endToEndId: tx.endToEndId || null,
-        source: 'consulta',
+        endToEndId: result.endToEndId,
+        source: `consulta:${order.gateway}`,
       });
       return paid || (await getOrder(order.id));
     }
 
-    if (state !== order.status) {
-      return await updateOrder(order, { status: state });
+    if (result.status !== order.status) {
+      return await updateOrder(order, { status: result.status });
     }
   } catch (err) {
-    if (err instanceof MisticPayError && err.status === 429) {
+    if (err instanceof GatewayError && err.status === 429) {
       // Rate limit do gateway: recua 10s alem da janela normal.
       await updateOrder(order, { lastGatewayPollAt: Date.now() + 10000 });
     }
-    console.error(`[consulta] pedido ${order.id}:`, err.message);
+    console.error(`[consulta] pedido ${order.id} (${order.gateway}):`, err.message);
   }
 
   return (await getOrder(order.id)) || order;
