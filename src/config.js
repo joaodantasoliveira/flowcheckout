@@ -14,6 +14,13 @@ function required(name, hint = '') {
   return value;
 }
 
+/** Valor que pode faltar: placeholders do .env.example contam como ausentes. */
+function optional(name) {
+  const value = process.env[name];
+  if (!value || /^(seu_|troque|sua_|demo_)/i.test(value)) return null;
+  return value;
+}
+
 function normalizeAdminPath(value) {
   const clean = `/${String(value).trim().replace(/^\/+|\/+$/g, '')}`;
   if (!/^\/[A-Za-z0-9_-]{6,}$/.test(clean)) {
@@ -76,10 +83,13 @@ export const config = {
     ),
   },
 
+  // As credenciais da MisticPay agora sao editaveis pelo painel e ficam
+  // cifradas no banco. O .env vira apenas o valor inicial — util no primeiro
+  // deploy, antes de alguem abrir o painel. O banco sempre tem precedencia.
   misticpay: {
     baseUrl: (process.env.MISTICPAY_BASE_URL || 'https://api.misticpay.com/api').replace(/\/$/, ''),
-    ci: required('MISTICPAY_CI'),
-    cs: required('MISTICPAY_CS'),
+    ci: optional('MISTICPAY_CI'),
+    cs: optional('MISTICPAY_CS'),
   },
 
   webhookToken: required('WEBHOOK_TOKEN', 'Gere um: npm run gen:secret'),

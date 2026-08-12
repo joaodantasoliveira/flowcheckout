@@ -88,6 +88,7 @@ function showView(view) {
   if (view === 'overview') loadOverview();
   if (view === 'products') loadProducts();
   if (view === 'orders') loadOrders();
+  if (view === 'settings') loadGateway();
   if (view === 'audit') loadAudit();
 }
 
@@ -462,6 +463,128 @@ $('#order-detail').addEventListener('click', async (event) => {
     } catch (err) {
       toast(err.message, true);
     }
+  }
+});
+
+/* ---------------- configurações do gateway ---------------- */
+
+async function loadGateway() {
+  const status = await api('/settings/gateway');
+
+  $('#gw-ci').value = status.ci || '';
+  $('#gw-cs').value = '';
+  $('#gw-base').textContent = status.baseUrl;
+  $('#gw-updated').textContent = status.updatedAt ? dateTime(status.updatedAt) : '—';
+
+  const badge = $('#gw-source');
+  badge.textContent = status.source === 'painel' ? 'Salvas no painel' : 'Vindas do ambiente';
+  badge.className = `pill pill--${status.source === 'painel' ? 'on' : 'off'}`;
+
+  $('#gw-cs-hint').textContent = status.csConfigured
+    ? 'Já existe um secret salvo. Deixe em branco para mantê-lo; preencha só para trocar.'
+    : 'Nenhum secret salvo ainda.';
+
+  $('#gw-cs').placeholder = status.csConfigured ? '•••••••••••••• (mantém o atual)' : '';
+
+  $('#gw-enc').textContent = status.encryptionReady
+    ? 'Ativa — o secret é gravado cifrado (AES-256-GCM)'
+    : 'INATIVA — configure APP_ENCRYPTION_KEY';
+
+  const warning = $('#gw-warning');
+  if (!status.tableReady) {
+    warning.className = 'hint hint--warn';
+    warning.textContent =
+      'A tabela "settings" ainda não existe no Supabase. Abra o SQL Editor e rode ' +
+      'supabase/migrations/002-settings.sql para poder salvar as credenciais por aqui.';
+    warning.hidden = false;
+    $('#gw-save').disabled = true;
+  } else if (!status.encryptionReady) {
+    warning.className = 'hint hint--warn';
+    warning.textContent =
+      'APP_ENCRYPTION_KEY não está configurada no servidor. Sem ela o Client Secret ' +
+      'seria gravado em texto claro no banco, então a gravação fica bloqueada. ' +
+      'Gere uma com "npm run gen:key" e cadastre nas variáveis de ambiente.';
+    warning.hidden = false;
+    $('#gw-save').disabled = true;
+  } else {
+    warning.hidden = true;
+    $('#gw-save').disabled = false;
+  }
+}
+
+function gatewayInputs() {
+  return { ci: $('#gw-ci').value.trim(), cs: $('#gw-cs').value.trim() };
+}
+
+function showGatewayResult(account) {
+  const box = $('#gw-ok');
+  box.innerHTML =
+    `Conectado como <strong>${esc(account.name || '—')}</strong>` +
+    (account.email ? ` (${esc(account.email)})` : '') +
+    (account.availableBalance !== null
+      ? ` · saldo disponível ${esc(brl(Math.round(account.availableBalance * 100)))}`
+      : '') +
+    (account.withdrawBlocked ? ' · <strong>saque bloqueado</strong>' : '');
+  box.hidden = false;
+  $('#gw-error').hidden = true;
+}
+
+function showGatewayError(message) {
+  const box = $('#gw-error');
+  box.textContent = message;
+  box.hidden = false;
+  $('#gw-ok').hidden = true;
+}
+
+$('#gw-test').addEventListener('click', async () => {
+  const { ci, cs } = gatewayInputs();
+  if (!ci) {
+    showGatewayError('Informe o Client ID.');
+    return;
+  }
+
+  const button = $('#gw-test');
+  button.disabled = true;
+  button.textContent = 'Testando…';
+
+  try {
+    const result = await api('/settings/gateway/test', { method: 'POST', body: { ci, cs } });
+    showGatewayResult(result.account);
+  } catch (err) {
+    showGatewayError(err.message);
+  } finally {
+    button.disabled = false;
+    button.textContent = 'Testar conexão';
+  }
+});
+
+$('#gateway-form').addEventListener('submit', async (event) => {
+  event.preventDefault();
+
+  const { ci, cs } = gatewayInputs();
+  if (!ci) {
+    showGatewayError('Informe o Client ID.');
+    return;
+  }
+
+  if (!confirm('Trocar as credenciais do gateway?\n\nElas passam a valer para todas as novas cobranças em até 30 segundos.')) {
+    return;
+  }
+
+  const button = $('#gw-save');
+  button.disabled = true;
+  button.textContent = 'Validando…';
+
+  try {
+    await api('/settings/gateway', { method: 'PUT', body: { ci, cs } });
+    toast('Credenciais validadas e salvas.');
+    await loadGateway();
+    $('#gw-ok').hidden = true;
+  } catch (err) {
+    showGatewayError(err.message);
+  } finally {
+    button.disabled = false;
+    button.textContent = 'Salvar credenciais';
   }
 });
 

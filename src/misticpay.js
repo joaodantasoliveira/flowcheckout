@@ -1,4 +1,5 @@
 import { config } from './config.js';
+import { getGatewayCredentials } from './settings.js';
 
 export class MisticPayError extends Error {
   constructor(message, { status = 502, body = null } = {}) {
@@ -15,8 +16,13 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
  * Wrapper HTTP da MisticPay.
  * As credenciais (ci/cs) so existem aqui, no servidor — nunca vao para o browser.
  */
-async function request(method, path, { body, timeoutMs = 20000, retries = 2 } = {}) {
+async function request(method, path, { body, timeoutMs = 20000, retries = 2, credentials } = {}) {
   const url = `${config.misticpay.baseUrl}${path}`;
+
+  // `credentials` so vem preenchido no teste de conexao do painel, para
+  // validar chaves novas ANTES de grava-las. No resto do sistema as
+  // credenciais em vigor saem de getGatewayCredentials().
+  const { ci, cs } = credentials || (await getGatewayCredentials());
 
   let lastError;
   for (let attempt = 0; attempt <= retries; attempt++) {
@@ -27,8 +33,8 @@ async function request(method, path, { body, timeoutMs = 20000, retries = 2 } = 
       const res = await fetch(url, {
         method,
         headers: {
-          ci: config.misticpay.ci,
-          cs: config.misticpay.cs,
+          ci,
+          cs,
           'Content-Type': 'application/json',
           Accept: 'application/json',
         },
@@ -126,4 +132,27 @@ export function getBalance() {
 /** GET /users/info */
 export function getAccountInfo() {
   return request('GET', '/users/info');
+}
+
+/**
+ * Valida um par de credenciais SEM grava-lo.
+ * Usado pelo painel antes de salvar: chave errada nao chega ao banco e
+ * nao derruba as vendas.
+ */
+export async function testCredentials({ ci, cs }) {
+  const response = await request('GET', '/users/info', {
+    credentials: { ci, cs },
+    retries: 0,
+    timeoutMs: 12000,
+  });
+
+  const data = response?.data || {};
+  return {
+    name: data.name || null,
+    email: data.email || null,
+    accountVerified: Boolean(data.accountVerified),
+    documentVerified: Boolean(data.documentVerified),
+    withdrawBlocked: Boolean(data.withdrawBlocked),
+    availableBalance: data.availableBalance ?? null,
+  };
 }

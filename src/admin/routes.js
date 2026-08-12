@@ -4,7 +4,8 @@ import { fileURLToPath } from 'node:url';
 import express, { Router } from 'express';
 
 import { audit, listAudit } from '../audit.js';
-import { getBalance } from '../misticpay.js';
+import { getBalance, testCredentials } from '../misticpay.js';
+import { getGatewayCredentials, getGatewayStatus, saveGatewayCredentials } from '../settings.js';
 import { syncOrderWithGateway } from '../orders.js';
 import {
   createProduct,
@@ -441,6 +442,103 @@ adminRouter.get(
       'Content-Disposition': `attachment; filename="vendas-${new Date().toISOString().slice(0, 10)}.csv"`,
     });
     res.send(csv);
+  })
+);
+
+/* ---------------- configurações do gateway ---------------- */
+
+adminRouter.get(
+  '/api/settings/gateway',
+  wrap(async (req, res) => res.json(await getGatewayStatus()))
+);
+
+/**
+ * Testa um par de credenciais sem gravar.
+ * Chave errada nao chega ao banco e nao derruba as vendas em andamento.
+ */
+/**
+ * Client Secret em branco significa "mantenha o atual" — assim da para
+ * corrigir so o Client ID sem precisar redigitar o secret.
+ */
+async function resolveCredentialInput(body) {
+  const ci = String(body?.ci || '').trim();
+  const typedCs = String(body?.cs || '').trim();
+
+  if (typedCs) return { ci, cs: typedCs, reusedSecret: false };
+
+  const current = await getGatewayCredentials();
+  return { ci, cs: current.cs || '', reusedSecret: true };
+}
+
+adminRouter.post(
+  '/api/settings/gateway/test',
+  wrap(async (req, res) => {
+    const { ci, cs } = await resolveCredentialInput(req.body);
+
+    if (!ci || !cs) {
+      return res.status(422).json({ error: 'Informe o Client ID e o Client Secret.' });
+    }
+
+    try {
+      const account = await testCredentials({ ci, cs });
+      await audit('gateway.credenciais_testadas', {
+        adminId: req.admin.id,
+        ip: req.ip,
+        detail: { ok: true },
+      });
+      res.json({ ok: true, account });
+    } catch (err) {
+      await audit('gateway.credenciais_testadas', {
+        adminId: req.admin.id,
+        ip: req.ip,
+        detail: { ok: false },
+      });
+      res.status(400).json({
+        error:
+          err.status === 401
+            ? 'A MisticPay recusou essas credenciais.'
+            : `Não foi possível validar: ${err.message}`,
+      });
+    }
+  })
+);
+
+adminRouter.put(
+  '/api/settings/gateway',
+  wrap(async (req, res) => {
+    const { ci, cs, reusedSecret } = await resolveCredentialInput(req.body);
+
+    if (!ci || !cs) {
+      return res.status(422).json({ error: 'Informe o Client ID e o Client Secret.' });
+    }
+
+    // Só grava o que a MisticPay aceitou. Salvar chave inválida deixaria a
+    // loja sem conseguir gerar PIX até alguém perceber.
+    try {
+      await testCredentials({ ci, cs });
+    } catch (err) {
+      return res.status(400).json({
+        error:
+          err.status === 401
+            ? 'A MisticPay recusou essas credenciais. Nada foi salvo.'
+            : `Não foi possível validar as credenciais: ${err.message}. Nada foi salvo.`,
+      });
+    }
+
+    try {
+      await saveGatewayCredentials({ ci, cs }, req.admin.id);
+    } catch (err) {
+      return res.status(500).json({ error: err.message });
+    }
+
+    await audit('gateway.credenciais_alteradas', {
+      adminId: req.admin.id,
+      ip: req.ip,
+      // Nunca registramos a credencial em si — só que ela mudou e por quem.
+      detail: { ci, secretTrocado: !reusedSecret },
+    });
+
+    res.json({ ok: true, ...(await getGatewayStatus()) });
   })
 );
 

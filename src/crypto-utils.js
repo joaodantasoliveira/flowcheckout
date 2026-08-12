@@ -1,3 +1,8 @@
+// Este modulo le APP_ENCRYPTION_KEY direto de process.env e pode ser
+// importado antes do config.js. Carregar o .env aqui tambem evita depender
+// da ordem dos imports (dotenv e idempotente).
+import 'dotenv/config';
+
 import crypto from 'node:crypto';
 
 /* ============================================================
@@ -56,6 +61,81 @@ export function verifyPassword(password, stored) {
   } catch {
     return false;
   }
+}
+
+/* ============================================================
+   Criptografia de segredos guardados no banco — AES-256-GCM
+   ============================================================ */
+
+/**
+ * Cifra credenciais antes de gravar (client secret do gateway, por exemplo).
+ *
+ * A chave vive em APP_ENCRYPTION_KEY, fora do banco. Assim um dump do
+ * Postgres — vazamento, backup mal guardado, acesso indevido ao Supabase —
+ * nao entrega as credenciais de pagamento sozinho.
+ *
+ * GCM e autenticado: se o texto cifrado for adulterado, decrypt lanca em
+ * vez de devolver lixo.
+ */
+function encryptionKey() {
+  const raw = process.env.APP_ENCRYPTION_KEY;
+  if (!raw) {
+    throw new Error(
+      'APP_ENCRYPTION_KEY não configurada. Gere uma com: npm run gen:key ' +
+        '(e cadastre também nas variáveis de ambiente da Vercel).'
+    );
+  }
+
+  const key = Buffer.from(raw, 'base64');
+  if (key.length !== 32) {
+    throw new Error('APP_ENCRYPTION_KEY deve ter 32 bytes em base64. Gere: npm run gen:key');
+  }
+  return key;
+}
+
+export const hasEncryptionKey = () => {
+  try {
+    encryptionKey();
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+export function encryptSecret(plaintext) {
+  const iv = crypto.randomBytes(12);
+  const cipher = crypto.createCipheriv('aes-256-gcm', encryptionKey(), iv);
+
+  const ciphertext = Buffer.concat([cipher.update(String(plaintext), 'utf8'), cipher.final()]);
+  const tag = cipher.getAuthTag();
+
+  return `v1.${iv.toString('base64url')}.${tag.toString('base64url')}.${ciphertext.toString('base64url')}`;
+}
+
+export function decryptSecret(payload) {
+  const [version, ivPart, tagPart, dataPart] = String(payload || '').split('.');
+  if (version !== 'v1' || !ivPart || !tagPart || !dataPart) {
+    throw new Error('Valor cifrado em formato inesperado.');
+  }
+
+  const decipher = crypto.createDecipheriv(
+    'aes-256-gcm',
+    encryptionKey(),
+    Buffer.from(ivPart, 'base64url')
+  );
+  decipher.setAuthTag(Buffer.from(tagPart, 'base64url'));
+
+  return Buffer.concat([
+    decipher.update(Buffer.from(dataPart, 'base64url')),
+    decipher.final(),
+  ]).toString('utf8');
+}
+
+/** Mostra so os ultimos caracteres — o resto nunca volta para o browser. */
+export function maskSecret(value, visible = 4) {
+  const text = String(value || '');
+  if (text.length <= visible) return '•'.repeat(8);
+  return `${'•'.repeat(Math.min(16, text.length - visible))}${text.slice(-visible)}`;
 }
 
 /* ============================================================

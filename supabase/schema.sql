@@ -128,6 +128,21 @@ create table if not exists public.rate_limits (
 create index if not exists rate_limits_window_idx on public.rate_limits (window_start);
 
 -- -------------------------------------------------------------
+--  CONFIGURAÇÕES (credenciais do gateway, editáveis pelo painel)
+--
+--  `secret` guarda valores cifrados com AES-256-GCM pela aplicação.
+--  A chave de criptografia vive em APP_ENCRYPTION_KEY, fora do banco:
+--  um dump do Postgres sozinho não entrega credenciais de pagamento.
+-- -------------------------------------------------------------
+create table if not exists public.settings (
+  key         text        primary key,
+  value       text,
+  secret      text,
+  updated_at  timestamptz not null default now(),
+  updated_by  uuid
+);
+
+-- -------------------------------------------------------------
 --  AUDITORIA
 -- -------------------------------------------------------------
 create table if not exists public.audit_log (
@@ -293,6 +308,7 @@ alter table public.admin_sessions enable row level security;
 alter table public.auth_attempts  enable row level security;
 alter table public.rate_limits    enable row level security;
 alter table public.audit_log      enable row level security;
+alter table public.settings       enable row level security;
 
 -- Nenhuma policy é criada de propósito: sem policy, RLS nega tudo.
 -- A chave service_role ignora RLS e é a única que a aplicação usa.

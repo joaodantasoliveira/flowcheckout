@@ -14,7 +14,8 @@
     "admin:create": "node scripts/create-admin.js",
     "db:check": "node scripts/check-db.js",
     "gen:secret": "node -e \"console.log(require('crypto').randomBytes(32).toString('hex'))\"",
-    "gen:path": "node -e \"console.log(require('crypto').randomBytes(9).toString('base64url'))\""
+    "gen:path": "node -e \"console.log(require('crypto').randomBytes(9).toString('base64url'))\"",
+    "gen:key": "node -e \"console.log(require('crypto').randomBytes(32).toString('base64'))\""
   },
   "dependencies": {
     "dotenv": "^16.4.5",

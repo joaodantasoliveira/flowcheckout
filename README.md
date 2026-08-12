@@ -23,9 +23,11 @@ cp .env.example .env       # Windows: copy .env.example .env
 npm run gen:secret         # WEBHOOK_TOKEN
 npm run gen:secret         # CRON_SECRET
 npm run gen:path           # ADMIN_PATH
+npm run gen:key            # APP_ENCRYPTION_KEY
 ```
 
-Preencha `SUPABASE_URL`, `SUPABASE_SECRET_KEY`, `MISTICPAY_CI`, `MISTICPAY_CS`.
+Preencha `SUPABASE_URL` e `SUPABASE_SECRET_KEY`. As credenciais da MisticPay
+são opcionais aqui — você as cadastra pelo painel, na aba **Configurações**.
 
 > **A chave do Supabase tem que ser a secreta** (`sb_secret_…` / `service_role`),
 > não a publishable. A publishable é a chave pública do browser e respeita RLS —
@@ -143,6 +145,29 @@ ruído de scanner automático; quem segura invasor é a camada abaixo:
 | Vazamento por cache | `no-store`, `no-referrer` e `X-Robots-Tag: noindex` em todas as respostas do painel. |
 | CSV | Campos começando com `=`, `+`, `-` ou `@` são neutralizados (formula injection no Excel). |
 | Banco | RLS ligado **sem policies** em todas as tabelas. A chave publishable não lê nem escreve nada; só a service_role, que vive no servidor. |
+
+### Credenciais do gateway
+
+Ficam na aba **Configurações** do painel, não no `.env`. Trocar não exige deploy.
+
+O Client Secret é gravado cifrado com **AES-256-GCM**, e a chave de cifra
+(`APP_ENCRYPTION_KEY`) vive nas variáveis de ambiente — **fora do banco**. Um dump
+do Postgres sozinho (backup mal guardado, acesso indevido ao Supabase) não entrega
+as credenciais de pagamento.
+
+Outras garantias:
+
+- O secret **nunca volta para o browser**. O painel só sabe que ele existe.
+- Antes de salvar, as credenciais são validadas contra `/users/info` da MisticPay.
+  Chave inválida não chega ao banco — salvar uma quebraria as vendas em silêncio.
+- Deixar o campo Secret em branco mantém o atual, para corrigir só o Client ID.
+- Toda alteração vai para a auditoria, com quem e de qual IP. A credencial em si
+  nunca é registrada.
+- Sem `APP_ENCRYPTION_KEY` configurada, o painel **recusa salvar** em vez de gravar
+  em texto claro.
+
+Instâncias já aquecidas levam até 30 s para pegar a credencial nova (cache curto,
+para não consultar o banco a cada cobrança).
 
 ### Recuperação de acesso
 
