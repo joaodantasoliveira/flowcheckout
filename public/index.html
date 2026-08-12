@@ -142,9 +142,18 @@
           <h2 class="done__title">Pagamento confirmado!</h2>
           <p class="done__text">
             Recebemos seu PIX de <strong data-price-inline>—</strong>.
-            Enviamos os detalhes de acesso para <strong id="done-email"></strong>.
+            Os detalhes de acesso vão para <strong id="done-email"></strong>.
           </p>
-          <p class="done__ref">Pedido <span id="done-order"></span></p>
+
+          <div class="done__order">
+            <span class="done__order-label">Número do pedido</span>
+            <span class="done__order-id" id="done-order"></span>
+            <button type="button" class="btn-copy-order" id="copy-order">Copiar</button>
+          </div>
+
+          <p class="done__hint">
+            Guarde este número. Ele identifica sua compra em qualquer contato com o suporte.
+          </p>
         </div>
       </div>
 

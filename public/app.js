@@ -369,6 +369,24 @@ function renderSuccess(order) {
   window.scrollTo({ top: 0, behavior: 'smooth' });
 }
 
+$('#copy-order').addEventListener('click', async () => {
+  const button = $('#copy-order');
+
+  try {
+    await navigator.clipboard.writeText($('#done-order').textContent);
+  } catch {
+    const range = document.createRange();
+    range.selectNode($('#done-order'));
+    getSelection().removeAllRanges();
+    getSelection().addRange(range);
+    document.execCommand('copy');
+    getSelection().removeAllRanges();
+  }
+
+  button.textContent = 'Copiado!';
+  setTimeout(() => (button.textContent = 'Copiar'), 2000);
+});
+
 /* ---------------- boot ---------------- */
 
 loadProduct().catch(() => {

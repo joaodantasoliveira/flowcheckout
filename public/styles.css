@@ -362,7 +362,42 @@ img { max-width: 100%; display: block; }
 
 .done__title { margin: 0 0 10px; font-size: 24px; font-weight: 700; }
 .done__text { margin: 0 auto; max-width: 460px; font-size: 15px; color: #374151; }
-.done__ref { margin-top: 16px; font-size: 13px; color: var(--muted); }
+
+.done__order {
+  display: inline-flex;
+  align-items: center;
+  gap: 14px;
+  margin-top: 26px;
+  padding: 14px 18px;
+  background: #fafafa;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.done__order-label { font-size: 13px; color: var(--muted); }
+
+.done__order-id {
+  font-family: ui-monospace, Menlo, Consolas, monospace;
+  font-size: 15px;
+  font-weight: 500;
+  color: var(--ink);
+}
+
+.btn-copy-order {
+  padding: 6px 12px;
+  font: inherit;
+  font-size: 13px;
+  color: var(--teal);
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  cursor: pointer;
+  transition: border-color .15s, background .15s;
+}
+
+.btn-copy-order:hover { background: var(--pix-bg); border-color: var(--teal); }
+
+.done__hint { margin: 16px auto 0; max-width: 420px; font-size: 13px; color: var(--muted); }
 
 /* ---------- resumo ---------- */
 
