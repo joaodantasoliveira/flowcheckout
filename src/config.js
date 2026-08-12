@@ -1,0 +1,107 @@
+import 'dotenv/config';
+
+function required(name, hint = '') {
+  const value = process.env[name];
+  if (!value || /^(seu_|troque|sua_)/i.test(value)) {
+    console.error(
+      `\n[config] Variavel de ambiente "${name}" nao configurada.` +
+        (hint ? `\n         ${hint}` : '') +
+        `\n         Em desenvolvimento: preencha o .env (copie de .env.example).` +
+        `\n         Na Vercel: Settings -> Environment Variables.\n`
+    );
+    process.exit(1);
+  }
+  return value;
+}
+
+function normalizeAdminPath(value) {
+  const clean = `/${String(value).trim().replace(/^\/+|\/+$/g, '')}`;
+  if (!/^\/[A-Za-z0-9_-]{6,}$/.test(clean)) {
+    console.error(
+      '\n[config] ADMIN_PATH deve ter ao menos 6 caracteres (letras, numeros, - ou _).\n' +
+        '         Gere um: npm run gen:path\n'
+    );
+    process.exit(1);
+  }
+  return clean;
+}
+
+/**
+ * A chave publishable (sb_publishable_ / anon) e feita para o browser e
+ * respeita RLS. Como o schema tranca tudo com RLS sem policy, usar ela aqui
+ * faria a aplicacao inteira falhar em silencio. Pior: se alguem "resolvesse"
+ * o problema desligando o RLS, os dados dos compradores e os hashes de senha
+ * ficariam legiveis por qualquer um com a chave — que esta publica.
+ */
+function validateSecretKey(key) {
+  const looksPublishable = /^sb_publishable_/.test(key) || /"role"\s*:\s*"anon"/.test(atobSafe(key));
+
+  if (looksPublishable) {
+    console.error(
+      '\n[config] SUPABASE_SECRET_KEY recebeu uma chave PUBLICA.\n' +
+        '         Essa chave e a que fica exposta no browser e respeita RLS —\n' +
+        '         com ela a aplicacao nao consegue ler nem gravar nada.\n\n' +
+        '         Pegue a chave SECRETA no painel do Supabase:\n' +
+        '         Project Settings -> API Keys -> secret (ou service_role).\n' +
+        '         Ela nunca deve aparecer no frontend nem no repositorio.\n'
+    );
+    process.exit(1);
+  }
+  return key;
+}
+
+/** Le o payload de um JWT sem validar assinatura — so para detectar o papel. */
+function atobSafe(token) {
+  try {
+    return Buffer.from(String(token).split('.')[1] || '', 'base64').toString('utf8');
+  } catch {
+    return '';
+  }
+}
+
+const publicUrl = (process.env.PUBLIC_URL || `http://localhost:${process.env.PORT || 3000}`).replace(/\/$/, '');
+
+export const config = {
+  port: Number(process.env.PORT || 3000),
+  publicUrl,
+  isProduction: process.env.NODE_ENV === 'production' || Boolean(process.env.VERCEL),
+
+  supabase: {
+    url: required('SUPABASE_URL').replace(/\/$/, ''),
+    secretKey: validateSecretKey(
+      required(
+        'SUPABASE_SECRET_KEY',
+        'Use a chave SECRETA (service_role), nunca a publishable.'
+      )
+    ),
+  },
+
+  misticpay: {
+    baseUrl: (process.env.MISTICPAY_BASE_URL || 'https://api.misticpay.com/api').replace(/\/$/, ''),
+    ci: required('MISTICPAY_CI'),
+    cs: required('MISTICPAY_CS'),
+  },
+
+  webhookToken: required('WEBHOOK_TOKEN', 'Gere um: npm run gen:secret'),
+
+  admin: {
+    path: normalizeAdminPath(required('ADMIN_PATH', 'Gere um: npm run gen:path')),
+    host: process.env.ADMIN_HOST ? process.env.ADMIN_HOST.trim().toLowerCase() : null,
+    ipAllowlist: (process.env.ADMIN_IP_ALLOWLIST || '')
+      .split(',')
+      .map((ip) => ip.trim().replace(/^::ffff:/, ''))
+      .filter(Boolean),
+    cookieSecure: !/^http:\/\/(localhost|127\.)/.test(publicUrl),
+  },
+
+  // Segredo do cron da Vercel (limpeza periodica). Opcional em dev.
+  cronSecret: process.env.CRON_SECRET || null,
+
+  split: {
+    user: process.env.SPLIT_USER || null,
+    tax: process.env.SPLIT_TAX ? Number(process.env.SPLIT_TAX) : null,
+  },
+
+  pixTtlSeconds: 30 * 60,
+  minGatewayPollMs: 4000,
+};

@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="robots" content="noindex, nofollow, noarchive" />
+<meta name="referrer" content="no-referrer" />
+<title>Acesso</title>
+<link rel="icon" href="data:," />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="assets/admin.css" />
+</head>
+<body class="login-body">
+
+<main class="login">
+  <form class="login__card" id="login-form" autocomplete="off" novalidate>
+    <div class="login__mark" aria-hidden="true">
+      <svg viewBox="0 0 24 24">
+        <rect x="5" y="10.5" width="14" height="9.5" rx="1.8"/>
+        <path d="M8.2 10.5V7.6a3.8 3.8 0 0 1 7.6 0v2.9"/>
+      </svg>
+    </div>
+
+    <h1 class="login__title">Acesso restrito</h1>
+    <p class="login__sub">Área administrativa. Todo acesso é registrado.</p>
+
+    <label class="lbl" for="username">Usuário</label>
+    <input class="inp" id="username" name="username" type="text"
+           autocomplete="username" spellcheck="false" required />
+
+    <label class="lbl" for="password">Senha</label>
+    <input class="inp" id="password" name="password" type="password"
+           autocomplete="current-password" required />
+
+    <label class="lbl" for="totp">Código do autenticador</label>
+    <input class="inp inp--code" id="totp" name="totp" type="text"
+           inputmode="numeric" autocomplete="one-time-code"
+           maxlength="6" placeholder="000000" required />
+
+    <p class="login__error" id="login-error" hidden></p>
+
+    <button class="btn btn--full" type="submit" id="login-btn">
+      <span class="btn__label">Entrar</span>
+      <span class="spinner" aria-hidden="true"></span>
+    </button>
+  </form>
+</main>
+
+<script src="assets/login.js"></script>
+</body>
+</html>

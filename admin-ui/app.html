@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="robots" content="noindex, nofollow, noarchive" />
+<meta name="referrer" content="no-referrer" />
+<title>Painel</title>
+<link rel="icon" href="data:," />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="assets/admin.css" />
+</head>
+<body>
+
+<header class="topbar">
+  <div class="topbar__inner">
+    <span class="topbar__brand">Painel</span>
+
+    <nav class="tabs" id="tabs">
+      <button class="tab is-active" data-view="overview">Visão geral</button>
+      <button class="tab" data-view="products">Produtos</button>
+      <button class="tab" data-view="orders">Vendas</button>
+      <button class="tab" data-view="audit">Auditoria</button>
+    </nav>
+
+    <div class="topbar__right">
+      <span class="who" id="who"></span>
+      <button class="btn btn--ghost" id="logout-btn">Sair</button>
+    </div>
+  </div>
+</header>
+
+<main class="wrap">
+
+  <!-- ================= VISÃO GERAL ================= -->
+  <section class="view is-active" data-view="overview">
+    <div class="stats" id="stats"></div>
+
+    <div class="split">
+      <div class="panel">
+        <div class="panel__head">
+          <h2 class="panel__title">Receita dos últimos 14 dias</h2>
+        </div>
+        <div class="chart" id="chart"></div>
+      </div>
+
+      <div class="panel">
+        <div class="panel__head">
+          <h2 class="panel__title">Produtos mais vendidos</h2>
+        </div>
+        <div id="top-products" class="ranked"></div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="panel__head">
+        <h2 class="panel__title">Últimos pedidos</h2>
+      </div>
+      <div class="table-scroll">
+        <table class="table" id="recent-table"></table>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= PRODUTOS ================= -->
+  <section class="view" data-view="products">
+    <div class="panel">
+      <div class="panel__head">
+        <h2 class="panel__title">Produtos</h2>
+        <button class="btn" id="new-product-btn">Novo produto</button>
+      </div>
+      <div class="table-scroll">
+        <table class="table" id="products-table"></table>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= VENDAS ================= -->
+  <section class="view" data-view="orders">
+    <div class="panel">
+      <div class="panel__head">
+        <h2 class="panel__title">Vendas</h2>
+        <div class="panel__actions">
+          <input class="inp inp--search" id="order-search" type="search"
+                 placeholder="Buscar por nome, e-mail, pedido…" />
+          <select class="inp inp--select" id="order-status">
+            <option value="TODOS">Todos os status</option>
+            <option value="COMPLETO">Pagos</option>
+            <option value="PENDENTE">Pendentes</option>
+            <option value="FALHA">Falha</option>
+            <option value="CANCELADO">Cancelados</option>
+          </select>
+          <button class="btn btn--ghost" id="export-btn">Exportar CSV</button>
+        </div>
+      </div>
+
+      <div class="table-scroll">
+        <table class="table" id="orders-table"></table>
+      </div>
+
+      <div class="pager" id="orders-pager"></div>
+    </div>
+  </section>
+
+  <!-- ================= AUDITORIA ================= -->
+  <section class="view" data-view="audit">
+    <div class="panel">
+      <div class="panel__head">
+        <h2 class="panel__title">Registro de acessos e ações</h2>
+        <button class="btn btn--ghost" id="revoke-btn">Encerrar outras sessões</button>
+      </div>
+      <div class="table-scroll">
+        <table class="table" id="audit-table"></table>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<!-- ================= MODAL DE PRODUTO ================= -->
+<div class="modal" id="product-modal" hidden>
+  <div class="modal__backdrop" data-close></div>
+  <div class="modal__box" role="dialog" aria-modal="true" aria-labelledby="product-modal-title">
+    <h2 class="modal__title" id="product-modal-title">Novo produto</h2>
+
+    <form id="product-form" novalidate>
+      <input type="hidden" id="p-id" />
+
+      <label class="lbl" for="p-name">Nome do produto</label>
+      <input class="inp" id="p-name" maxlength="120" required />
+
+      <label class="lbl" for="p-subtitle">Descrição curta</label>
+      <input class="inp" id="p-subtitle" maxlength="120" placeholder="Pagamento único" />
+
+      <div class="modal__row">
+        <div>
+          <label class="lbl" for="p-price">Preço</label>
+          <input class="inp" id="p-price" inputmode="decimal" placeholder="R$ 0,00" required />
+        </div>
+        <div>
+          <label class="lbl" for="p-installments">Parcelas exibidas</label>
+          <input class="inp" id="p-installments" type="number" min="1" max="12" value="1" />
+        </div>
+      </div>
+
+      <label class="lbl" for="p-image">Imagem (caminho local ou URL https)</label>
+      <input class="inp" id="p-image" placeholder="/img/produto.svg" />
+
+      <label class="check">
+        <input type="checkbox" id="p-active" checked />
+        <span>Ativo — disponível para venda no checkout</span>
+      </label>
+
+      <p class="modal__error" id="product-error" hidden></p>
+
+      <div class="modal__actions">
+        <button type="button" class="btn btn--ghost" data-close>Cancelar</button>
+        <button type="submit" class="btn" id="product-save">Salvar</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- ================= MODAL DE PEDIDO ================= -->
+<div class="modal" id="order-modal" hidden>
+  <div class="modal__backdrop" data-close></div>
+  <div class="modal__box" role="dialog" aria-modal="true" aria-labelledby="order-modal-title">
+    <h2 class="modal__title" id="order-modal-title">Detalhes do pedido</h2>
+    <div id="order-detail"></div>
+    <div class="modal__actions">
+      <button type="button" class="btn btn--ghost" data-close>Fechar</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast" hidden></div>
+
+<script src="assets/admin.js"></script>
+</body>
+</html>

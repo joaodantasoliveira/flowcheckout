@@ -1,0 +1,16 @@
+node_modules/
+
+# Segredos — nunca versionar
+.env
+.env.local
+.env.*.local
+
+# Vercel
+.vercel
+
+# Banco local da versao anterior (hoje tudo vive no Supabase)
+data/
+
+*.log
+.DS_Store
+Thumbs.db
