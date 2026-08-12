@@ -363,6 +363,30 @@ img { max-width: 100%; display: block; }
 .done__title { margin: 0 0 10px; font-size: 24px; font-weight: 700; }
 .done__text { margin: 0 auto; max-width: 460px; font-size: 15px; color: #374151; }
 
+/* Mensagem personalizada preserva as quebras de linha digitadas no painel. */
+.done__text--custom { white-space: pre-line; }
+
+.done__cta {
+  /* flex + width fit-content garante linha própria; inline-flex deixaria o
+     botão colado na caixa do número do pedido. */
+  display: flex;
+  width: fit-content;
+  align-items: center;
+  justify-content: center;
+  min-width: 260px;
+  height: 56px;
+  margin: 28px auto 0;
+  padding: 0 28px;
+  font-size: 16px;
+  color: #fff;
+  background: var(--teal);
+  border-radius: var(--radius);
+  text-decoration: none;
+  transition: background .15s;
+}
+
+.done__cta:hover { background: var(--teal-hover); }
+
 .done__order {
   display: inline-flex;
   align-items: center;

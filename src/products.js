@@ -8,6 +8,44 @@ import { dbDelete, dbInsert, dbSelect, dbSelectOne, dbUpdate } from './supabase.
  * pelo devtools e gere um PIX de R$ 1,00 para um produto de R$ 6.993,00.
  */
 
+/**
+ * A migracao 004 adiciona as colunas da tela de obrigado. Sem ela, gravar um
+ * produto quebraria com "erro interno" e ninguem saberia por que. Traduzimos
+ * para uma mensagem que diz o que fazer.
+ */
+async function comMigracao004(fn) {
+  try {
+    return await fn();
+  } catch (err) {
+    if (/success_(title|message|button)/.test(err?.message || '')) {
+      const erro = new Error(
+        'A personalização da tela de obrigado precisa da migração 004. ' +
+          'Rode supabase/migrations/004-tela-obrigado.sql no SQL Editor do Supabase.'
+      );
+      erro.status = 422;
+      throw erro;
+    }
+    throw err;
+  }
+}
+
+/** Campos da tela de obrigado, normalizados para gravar. */
+function successColumns(patch = {}) {
+  const success = patch.success || {};
+  const row = {};
+
+  if (success.title !== undefined) row.success_title = String(success.title).trim() || null;
+  if (success.message !== undefined) row.success_message = String(success.message).trim() || null;
+  if (success.buttonLabel !== undefined) {
+    row.success_button_label = String(success.buttonLabel).trim() || null;
+  }
+  if (success.buttonUrl !== undefined) {
+    row.success_button_url = String(success.buttonUrl).trim() || null;
+  }
+
+  return row;
+}
+
 const slugify = (text) =>
   String(text)
     .normalize('NFD')
@@ -27,6 +65,12 @@ const fromRow = (row) =>
     priceCents: Number(row.price_cents),
     maxInstallments: row.max_installments,
     active: row.active,
+    success: {
+      title: row.success_title || '',
+      message: row.success_message || '',
+      buttonLabel: row.success_button_label || '',
+      buttonUrl: row.success_button_url || '',
+    },
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -69,16 +113,30 @@ export async function defaultProductId() {
   return row?.id || null;
 }
 
-export async function createProduct({ name, subtitle, priceCents, image, maxInstallments, active }) {
-  const row = await dbInsert('products', {
-    id: await uniqueId(slugify(name)),
-    name: String(name).trim(),
-    subtitle: String(subtitle || '').trim(),
-    image: String(image || '').trim() || '/img/produto.svg',
-    price_cents: Math.round(Number(priceCents)),
-    max_installments: Math.min(12, Math.max(1, Number(maxInstallments) || 1)),
-    active: active !== false,
-  });
+export async function createProduct({
+  name,
+  subtitle,
+  priceCents,
+  image,
+  maxInstallments,
+  active,
+  success,
+}) {
+  const id = await uniqueId(slugify(name));
+
+  const row = await comMigracao004(() =>
+    dbInsert('products', {
+      id,
+      name: String(name).trim(),
+      subtitle: String(subtitle || '').trim(),
+      image: String(image || '').trim() || '/img/produto.svg',
+      price_cents: Math.round(Number(priceCents)),
+      max_installments: Math.min(12, Math.max(1, Number(maxInstallments) || 1)),
+      active: active !== false,
+      ...successColumns({ success }),
+    })
+  );
+
   return fromRow(row);
 }
 
@@ -93,9 +151,13 @@ export async function updateProduct(productId, patch) {
   }
   if (patch.active !== undefined) row.active = Boolean(patch.active);
 
+  Object.assign(row, successColumns(patch));
+
   row.updated_at = new Date().toISOString();
 
-  return fromRow(await dbUpdate('products', { id: `eq.${productId}` }, row));
+  return fromRow(
+    await comMigracao004(() => dbUpdate('products', { id: `eq.${productId}` }, row))
+  );
 }
 
 /**
@@ -148,6 +210,32 @@ export function validateProductInput(body = {}, { partial = false } = {}) {
     // Caminho local ou https. Bloqueia javascript:, data: e http em texto claro.
     if (image && !/^\/[\w\-./]*$/.test(image) && !/^https:\/\/[\w\-.]+\/\S*$/.test(image)) {
       errors.image = 'Use um caminho local (/img/...) ou uma URL https.';
+    }
+  }
+
+  if (body.success) {
+    const { title = '', message = '', buttonLabel = '', buttonUrl = '' } = body.success;
+
+    if (String(title).length > 80) errors.successTitle = 'Título deve ter até 80 caracteres.';
+    if (String(message).length > 600) errors.successMessage = 'Mensagem deve ter até 600 caracteres.';
+    if (String(buttonLabel).length > 40) errors.successButtonLabel = 'Texto do botão deve ter até 40 caracteres.';
+
+    const url = String(buttonUrl).trim();
+    if (url) {
+      // Este valor vai para um href. Só https: javascript: e data: virariam
+      // execução de script na tela de confirmação do comprador.
+      if (!/^https:\/\/[\w-]+(\.[\w-]+)+(\/\S*)?$/i.test(url)) {
+        errors.successButtonUrl = 'O link deve começar com https:// e ser um endereço válido.';
+      } else if (url.length > 500) {
+        errors.successButtonUrl = 'Link muito longo.';
+      }
+    }
+
+    if (String(buttonLabel).trim() && !url) {
+      errors.successButtonUrl = 'Informe o link de destino do botão.';
+    }
+    if (url && !String(buttonLabel).trim()) {
+      errors.successButtonLabel = 'Informe o texto que aparece no botão.';
     }
   }
 

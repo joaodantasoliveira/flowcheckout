@@ -139,11 +139,13 @@
           <div class="done__mark">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg>
           </div>
-          <h2 class="done__title">Pagamento confirmado!</h2>
-          <p class="done__text">
+          <h2 class="done__title" id="done-title">Pagamento confirmado!</h2>
+          <p class="done__text" id="done-text">
             Recebemos seu PIX de <strong data-price-inline>—</strong>.
             Os detalhes de acesso vão para <strong id="done-email"></strong>.
           </p>
+
+          <a class="done__cta" id="done-cta" hidden rel="noopener noreferrer" target="_blank"></a>
 
           <div class="done__order">
             <span class="done__order-label">Número do pedido</span>

@@ -251,6 +251,13 @@ function openProductModal(product = null) {
   $('#p-installments').value = product?.maxInstallments || 1;
   $('#p-image').value = product?.image || '';
   $('#p-active').checked = product ? product.active : true;
+
+  const success = product?.success || {};
+  $('#p-success-title').value = success.title || '';
+  $('#p-success-message').value = success.message || '';
+  $('#p-success-btn-label').value = success.buttonLabel || '';
+  $('#p-success-btn-url').value = success.buttonUrl || '';
+
   $('#product-error').hidden = true;
 
   $('#product-modal').hidden = false;
@@ -284,6 +291,12 @@ $('#product-form').addEventListener('submit', async (event) => {
     maxInstallments: Number($('#p-installments').value) || 1,
     image: $('#p-image').value,
     active: $('#p-active').checked,
+    success: {
+      title: $('#p-success-title').value,
+      message: $('#p-success-message').value,
+      buttonLabel: $('#p-success-btn-label').value,
+      buttonUrl: $('#p-success-btn-url').value,
+    },
   };
 
   const id = $('#p-id').value;

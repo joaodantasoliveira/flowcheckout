@@ -362,7 +362,32 @@ function stopTimers() {
 }
 
 function renderSuccess(order) {
-  $('#done-email').textContent = $('#email').value.trim();
+  const custom = state.product?.success || {};
+  const email = $('#email').value.trim();
+
+  if (custom.title) $('#done-title').textContent = custom.title;
+
+  if (custom.message) {
+    // textContent, nunca innerHTML: o texto vem do painel e um admin
+    // comprometido não pode injetar script na tela do comprador.
+    // {email}, {pedido} e {valor} são substituídos aqui.
+    $('#done-text').textContent = custom.message
+      .replaceAll('{email}', email)
+      .replaceAll('{pedido}', order.id)
+      .replaceAll('{valor}', state.product.amountFormatted);
+    $('#done-text').classList.add('done__text--custom');
+  } else {
+    $('#done-email').textContent = email;
+  }
+
+  // O href só é preenchido se o servidor validou como https.
+  if (custom.buttonLabel && /^https:\/\//i.test(custom.buttonUrl || '')) {
+    const cta = $('#done-cta');
+    cta.textContent = custom.buttonLabel;
+    cta.href = custom.buttonUrl;
+    cta.hidden = false;
+  }
+
   $('#done-order').textContent = order.id;
   $('#step-pix').hidden = true;
   $('#step-done').hidden = false;

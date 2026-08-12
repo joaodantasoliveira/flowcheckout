@@ -23,8 +23,29 @@ create table if not exists public.products (
   price_cents       bigint      not null check (price_cents >= 100),
   max_installments  smallint    not null default 1 check (max_installments between 1 and 12),
   active            boolean     not null default true,
+
+  -- Tela de obrigado, personalizável por produto. Vazio usa o texto padrão.
+  success_title        text,
+  success_message      text,
+  success_button_label text,
+  success_button_url   text,
+
   created_at        timestamptz not null default now(),
-  updated_at        timestamptz not null default now()
+  updated_at        timestamptz not null default now(),
+
+  constraint products_success_len check (
+    coalesce(length(success_title), 0)        <= 80  and
+    coalesce(length(success_message), 0)      <= 600 and
+    coalesce(length(success_button_label), 0) <= 40  and
+    coalesce(length(success_button_url), 0)   <= 500
+  ),
+
+  -- Só https: javascript: e data: viram XSS na tela de confirmação.
+  constraint products_success_url_https check (
+    success_button_url is null
+    or success_button_url = ''
+    or success_button_url ~ '^https://'
+  )
 );
 
 create index if not exists products_active_idx on public.products (active, created_at);

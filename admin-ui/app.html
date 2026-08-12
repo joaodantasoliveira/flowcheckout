@@ -185,6 +185,42 @@
         <span>Ativo — disponível para venda no checkout</span>
       </label>
 
+      <hr class="rule" />
+
+      <h3 class="modal__section">Tela de obrigado</h3>
+      <p class="hint">
+        O que o comprador vê depois do pagamento. Deixe em branco para usar o texto padrão.
+      </p>
+
+      <label class="lbl" for="p-success-title">Título</label>
+      <input class="inp" id="p-success-title" maxlength="80"
+             placeholder="Pagamento confirmado!" />
+
+      <label class="lbl" for="p-success-message">Mensagem</label>
+      <textarea class="inp inp--area" id="p-success-message" rows="4" maxlength="600"
+                placeholder="Obrigado pela compra! Seu acesso vai para {email} em alguns minutos."></textarea>
+      <p class="hint">
+        Você pode usar <code>{email}</code>, <code>{pedido}</code> e <code>{valor}</code> —
+        são trocados pelos dados reais da compra.
+      </p>
+
+      <div class="modal__row">
+        <div>
+          <label class="lbl" for="p-success-btn-label">Botão (texto)</label>
+          <input class="inp" id="p-success-btn-label" maxlength="40"
+                 placeholder="Acessar agora" />
+        </div>
+        <div>
+          <label class="lbl" for="p-success-btn-url">Botão (link)</label>
+          <input class="inp" id="p-success-btn-url" maxlength="500"
+                 placeholder="https://..." spellcheck="false" />
+        </div>
+      </div>
+      <p class="hint">
+        Opcional. Serve para levar direto à área de membros, ao grupo de WhatsApp ou ao
+        download. Só aceita <code>https://</code>.
+      </p>
+
       <p class="modal__error" id="product-error" hidden></p>
 
       <div class="modal__actions">

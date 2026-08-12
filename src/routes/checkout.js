@@ -34,6 +34,8 @@ checkoutRouter.get('/product', async (req, res, next) => {
       amountCents: product.priceCents,
       amountFormatted: formatBRL(product.priceCents),
       maxInstallments: product.maxInstallments,
+      // Textos da tela de confirmação. Vazio faz o front usar o padrão.
+      success: product.success,
       // Ambos os gateways integrados processam apenas PIX.
       methods: { pix: true, card: false },
     });
