@@ -287,6 +287,20 @@ scripts/check-db.js        diagnóstico da conexão e do schema
 2. **Cadastrar seus produtos** pelo painel. Cada produto tem link próprio
    (`/?produto=<id>`), copiável direto da lista.
 
+   **Tela de obrigado por produto:** título, mensagem e um botão opcional de
+   acesso, no mesmo formulário. Vazio usa o texto padrão. Na mensagem,
+   `{email}`, `{pedido}` e `{valor}` viram os dados reais da compra.
+
+   Duas travas, porque esse texto é escrito no painel e exibido no navegador de
+   quem acabou de pagar: a mensagem entra por `textContent` (nunca `innerHTML`),
+   e o link do botão só aceita `https://` — validado no servidor **e** por
+   constraint no Postgres. Um `javascript:` ali viraria execução de script na
+   tela do comprador.
+
+   O botão é o caminho mais curto para entregar de fato: aponte para a área de
+   membros, o grupo de WhatsApp ou o download, e o comprador sai da tela com o
+   produto em mãos, sem depender de e-mail.
+
 3. **Tratar MEDs.** Contestações chegam pelo webhook com `event: "INFRACTION"` e
    hoje só geram log de alerta e marcação no pedido. O prazo de defesa é curto e
    cada infração aceita **uma única** resposta — vale plugar um alerta.
