@@ -38,6 +38,39 @@ cronRouter.get('/cleanup', async (req, res) => {
 });
 
 /**
+ * GET /api/cron/egress-ip
+ *
+ * Mostra de qual IP as chamadas ao gateway estao saindo.
+ *
+ * Serve para responder a pergunta "qual IP libero na allowlist da MisticPay?".
+ * Chame algumas vezes: em serverless o IP costuma MUDAR entre invocacoes,
+ * porque cada instancia sobe num host diferente da nuvem. Se variar, uma
+ * allowlist fixa vai derrubar suas cobrancas de forma intermitente.
+ *
+ * Protegido pelo CRON_SECRET — o IP de saida nao precisa ser publico.
+ */
+cronRouter.get('/egress-ip', async (req, res) => {
+  if (!authorized(req)) return res.status(404).end();
+
+  try {
+    const [v4, meta] = await Promise.all([
+      fetch('https://api.ipify.org?format=json').then((r) => r.json()).catch(() => null),
+      fetch('https://ipinfo.io/json').then((r) => r.json()).catch(() => null),
+    ]);
+
+    res.json({
+      egressIp: v4?.ip || meta?.ip || null,
+      regiao: process.env.VERCEL_REGION || 'local',
+      provedor: meta?.org || null,
+      aviso:
+        'Chame algumas vezes. Se o IP mudar, não use allowlist de IP fixo com este host.',
+    });
+  } catch (err) {
+    res.status(502).json({ error: `Não foi possível medir: ${err.message}` });
+  }
+});
+
+/**
  * A Vercel envia `Authorization: Bearer <CRON_SECRET>` nas chamadas agendadas.
  * Sem CRON_SECRET configurado, o endpoint so responde em desenvolvimento.
  */
