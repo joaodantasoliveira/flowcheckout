@@ -1,15 +1,18 @@
 import 'dotenv/config';
 
+/**
+ * Em serverless nao dava para chamar process.exit aqui: a funcao morria na
+ * inicializacao e a Vercel devolvia apenas "FUNCTION_INVOCATION_FAILED",
+ * sem dizer qual variavel faltava. Agora acumulamos os problemas e deixamos
+ * o app responder 503 com um diagnostico legivel.
+ */
+const problems = [];
+
 function required(name, hint = '') {
   const value = process.env[name];
   if (!value || /^(seu_|troque|sua_)/i.test(value)) {
-    console.error(
-      `\n[config] Variavel de ambiente "${name}" nao configurada.` +
-        (hint ? `\n         ${hint}` : '') +
-        `\n         Em desenvolvimento: preencha o .env (copie de .env.example).` +
-        `\n         Na Vercel: Settings -> Environment Variables.\n`
-    );
-    process.exit(1);
+    problems.push({ name, hint });
+    return null;
   }
   return value;
 }
@@ -22,13 +25,16 @@ function optional(name) {
 }
 
 function normalizeAdminPath(value) {
+  // Ausente ja foi registrado por required(); nao duplica o erro.
+  if (!value) return '/__configuracao_ausente__';
+
   const clean = `/${String(value).trim().replace(/^\/+|\/+$/g, '')}`;
   if (!/^\/[A-Za-z0-9_-]{6,}$/.test(clean)) {
-    console.error(
-      '\n[config] ADMIN_PATH deve ter ao menos 6 caracteres (letras, numeros, - ou _).\n' +
-        '         Gere um: npm run gen:path\n'
-    );
-    process.exit(1);
+    problems.push({
+      name: 'ADMIN_PATH',
+      hint: 'Precisa de ao menos 6 caracteres (letras, números, - ou _). Gere: npm run gen:path',
+    });
+    return '/__configuracao_ausente__';
   }
   return clean;
 }
@@ -41,18 +47,18 @@ function normalizeAdminPath(value) {
  * ficariam legiveis por qualquer um com a chave — que esta publica.
  */
 function validateSecretKey(key) {
+  if (!key) return null;
+
   const looksPublishable = /^sb_publishable_/.test(key) || /"role"\s*:\s*"anon"/.test(atobSafe(key));
 
   if (looksPublishable) {
-    console.error(
-      '\n[config] SUPABASE_SECRET_KEY recebeu uma chave PUBLICA.\n' +
-        '         Essa chave e a que fica exposta no browser e respeita RLS —\n' +
-        '         com ela a aplicacao nao consegue ler nem gravar nada.\n\n' +
-        '         Pegue a chave SECRETA no painel do Supabase:\n' +
-        '         Project Settings -> API Keys -> secret (ou service_role).\n' +
-        '         Ela nunca deve aparecer no frontend nem no repositorio.\n'
-    );
-    process.exit(1);
+    problems.push({
+      name: 'SUPABASE_SECRET_KEY',
+      hint:
+        'Recebeu a chave PÚBLICA (publishable/anon). Ela respeita RLS e não lê nada. ' +
+        'Use a chave secreta: Supabase → Project Settings → API Keys → secret (service_role).',
+    });
+    return null;
   }
   return key;
 }
@@ -74,7 +80,7 @@ export const config = {
   isProduction: process.env.NODE_ENV === 'production' || Boolean(process.env.VERCEL),
 
   supabase: {
-    url: required('SUPABASE_URL').replace(/\/$/, ''),
+    url: (required('SUPABASE_URL') || '').replace(/\/$/, ''),
     secretKey: validateSecretKey(
       required(
         'SUPABASE_SECRET_KEY',
@@ -114,4 +120,24 @@ export const config = {
 
   pixTtlSeconds: 30 * 60,
   minGatewayPollMs: 4000,
+
+  // Preenchido logo abaixo.
+  problems: [],
 };
+
+config.problems = problems;
+
+if (problems.length) {
+  const lista = problems.map((p) => `  - ${p.name}${p.hint ? `\n      ${p.hint}` : ''}`).join('\n');
+
+  console.error(
+    `\n[config] ${problems.length} variável(is) de ambiente pendente(s):\n${lista}\n\n` +
+      '         Local: preencha o .env (copie de .env.example).\n' +
+      '         Vercel: Settings -> Environment Variables, depois REDEPLOY.\n'
+  );
+
+  // Local: falha rápido, o desenvolvedor está olhando o terminal.
+  // Serverless: seguir em frente para o app conseguir responder 503 com o
+  // diagnóstico. Morrer aqui só produziria FUNCTION_INVOCATION_FAILED.
+  if (!config.isProduction) process.exit(1);
+}

@@ -35,6 +35,25 @@ app.use((req, res, next) => {
   next();
 });
 
+/**
+ * Configuracao incompleta: responde 503 legivel em vez de deixar a funcao
+ * morrer com "FUNCTION_INVOCATION_FAILED", que nao diz o que faltou.
+ * Os NOMES das variaveis nao sao segredo (estao no repositorio publico);
+ * os valores nunca aparecem.
+ */
+app.use((req, res, next) => {
+  if (!config.problems.length) return next();
+
+  const faltando = config.problems.map((p) => p.name);
+  console.error('[config] requisição recusada, variáveis pendentes:', faltando.join(', '));
+
+  res.status(503).json({
+    error: 'Aplicação sem configuração completa.',
+    variaveisPendentes: faltando,
+    comoResolver: 'Vercel → Settings → Environment Variables, depois faça um novo deploy.',
+  });
+});
+
 // O painel fica sob um prefixo secreto e responde antes de tudo.
 app.use(config.admin.path, adminRouter);
 
