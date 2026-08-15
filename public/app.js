@@ -11,6 +11,7 @@ const state = {
   product: null,
   method: 'pix',
   order: null,
+  tracking: null,
   pollTimer: null,
   tickTimer: null,
 };
@@ -126,6 +127,116 @@ function validateAll() {
   }
   return ok;
 }
+/* ---------------- rastreamento ---------------- */
+
+/**
+ * Identificadores de atribuição do Meta.
+ *
+ * Cookie não atravessa domínio: o snippet da landing carimba `_fbp`, `_fbc`
+ * e `_eid` na URL do checkout. Lemos de lá primeiro e guardamos em cookie
+ * próprio, para sobreviver ao recarregar a página.
+ */
+const tracking = (() => {
+  const params = new URLSearchParams(location.search);
+
+  const ler = (nome) => {
+    const m = document.cookie.match('(^|; )' + nome + '=([^;]*)');
+    return m ? decodeURIComponent(m[2]) : null;
+  };
+
+  const gravar = (nome, valor) => {
+    if (!valor) return;
+    document.cookie =
+      `${nome}=${encodeURIComponent(valor)};path=/;max-age=${60 * 60 * 24 * 90};SameSite=Lax` +
+      (location.protocol === 'https:' ? ';Secure' : '');
+  };
+
+  // URL vence cookie: é o dado mais recente, vindo do clique atual.
+  const fbp = params.get('_fbp') || ler('_fbp');
+  let fbc = params.get('_fbc') || ler('_fbc');
+
+  // Anúncio que aponta direto para o checkout, sem passar pela landing.
+  const fbclid = params.get('fbclid');
+  if (!fbc && fbclid) fbc = `fb.1.${Date.now()}.${fbclid}`;
+
+  const externalId = params.get('_eid') || ler('_fc_ext');
+
+  gravar('_fbp', fbp);
+  gravar('_fbc', fbc);
+  gravar('_fc_ext', externalId);
+
+  return {
+    fbp,
+    fbc,
+    fbclid,
+    externalId,
+    pageUrl: location.href,
+    utmSource: params.get('utm_source'),
+    utmMedium: params.get('utm_medium'),
+    utmCampaign: params.get('utm_campaign'),
+    utmContent: params.get('utm_content'),
+    utmTerm: params.get('utm_term'),
+  };
+})();
+
+/** Carrega o pixel do navegador só quando o produto tem um configurado. */
+let pixelPronto = false;
+
+function initPixel(pixelId) {
+  if (pixelPronto || !pixelId || window.fbq) {
+    if (window.fbq && !pixelPronto && pixelId) {
+      window.fbq('init', pixelId, trackingInitParams());
+      pixelPronto = true;
+    }
+    return;
+  }
+
+  /* eslint-disable */
+  !(function (f, b, e, v, n, t, s) {
+    if (f.fbq) return; n = f.fbq = function () { n.callMethod ? n.callMethod.apply(n, arguments) : n.queue.push(arguments); };
+    if (!f._fbq) f._fbq = n; n.push = n; n.loaded = !0; n.version = '2.0'; n.queue = [];
+    t = b.createElement(e); t.async = !0; t.src = v;
+    s = b.getElementsByTagName(e)[0]; s.parentNode.insertBefore(t, s);
+  })(window, document, 'script', 'https://connect.facebook.net/en_US/fbevents.js');
+  /* eslint-enable */
+
+  window.fbq('init', pixelId, trackingInitParams());
+  window.fbq('track', 'PageView');
+  pixelPronto = true;
+}
+
+/** Dados de identificação que o navegador já consegue mandar no init. */
+function trackingInitParams() {
+  const params = {};
+  if (tracking.externalId) params.external_id = tracking.externalId;
+
+  const email = $('#email')?.value.trim();
+  const phone = onlyDigits($('#phone')?.value || '');
+  // O pixel aplica o hash sozinho nestes campos.
+  if (email) params.em = email.toLowerCase();
+  if (phone) params.ph = phone.startsWith('55') ? phone : `55${phone}`;
+
+  return params;
+}
+
+/**
+ * Dispara no navegador o mesmo evento que o servidor manda pela Conversions
+ * API, com o MESMO eventID. É assim que o Meta entende que é uma conversão
+ * só e não conta a venda duas vezes.
+ */
+function fbTrack(eventName, eventId, custom = {}) {
+  if (!window.fbq || !eventId) return;
+
+  window.fbq('track', eventName, {
+    currency: 'BRL',
+    value: state.product ? state.product.amountCents / 100 : undefined,
+    content_ids: state.product ? [state.product.id] : undefined,
+    content_name: state.product?.name,
+    content_type: 'product',
+    ...custom,
+  }, { eventID: eventId });
+}
+
 /* ---------------- produto e métodos ---------------- */
 
 const METHOD_INFO = {
@@ -163,6 +274,8 @@ async function loadProduct() {
 
   $$('[data-price]').forEach((el) => (el.textContent = product.amountFormatted));
   $$('[data-price-inline]').forEach((el) => (el.textContent = product.amountFormatted));
+
+  if (product.pixelId) initPixel(product.pixelId);
 
   renderMethods(product);
 }
@@ -313,6 +426,7 @@ $('#checkout-form').addEventListener('submit', async (event) => {
         email: $('#email').value,
         document: onlyDigits($('#document').value),
         phone: onlyDigits($('#phone').value),
+        tracking,
       }),
     });
 
@@ -326,6 +440,15 @@ $('#checkout-form').addEventListener('submit', async (event) => {
     }
 
     state.order = body;
+
+    // O servidor devolve o pixel do produto e os ids de evento; o mesmo id
+    // sai daqui e da Conversions API, e o Meta deduplica.
+    if (body.tracking) {
+      state.tracking = body.tracking;
+      if (body.tracking.pixelId) initPixel(body.tracking.pixelId);
+      fbTrack('InitiateCheckout', body.tracking.initiateEventId);
+    }
+
     renderPix(body);
   } catch (err) {
     showAlert(err.message);
@@ -443,6 +566,13 @@ function stopTimers() {
 function renderSuccess(order) {
   const custom = state.product?.success || {};
   const email = $('#email').value.trim();
+
+  // Mesmo eventID que o servidor usou na Conversions API: o Meta junta os
+  // dois e conta uma venda só. O servidor dispara de qualquer forma — este
+  // aqui é o reforço para quem ficou com a aba aberta.
+  if (state.tracking?.purchaseEventId) {
+    fbTrack('Purchase', state.tracking.purchaseEventId, { order_id: order.id });
+  }
 
   if (custom.title) $('#done-title').textContent = custom.title;
 

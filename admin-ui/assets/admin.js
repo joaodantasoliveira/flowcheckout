@@ -101,6 +101,7 @@ const VIEW_TITLES = {
   'products': 'Produtos',
   'orders': 'Vendas',
   'settings': 'Configurações',
+  'pixels': 'Rastreamento',
   'audit': 'Auditoria'
 };
 
@@ -115,6 +116,7 @@ function showView(view) {
   if (view === 'products') loadProducts();
   if (view === 'orders') loadOrders();
   if (view === 'settings') loadGateways();
+  if (view === 'pixels') loadPixels();
   if (view === 'audit') loadAudit();
 }
 
@@ -493,6 +495,31 @@ $('#products-table').addEventListener('click', async (event) => {
   }
 });
 
+
+/** Preenche o seletor de pixel do produto. */
+async function populatePixelSelect(selectedId) {
+  const select = $('#p-pixel');
+  if (!select) return;
+
+  select.innerHTML = '<option value="">Sem rastreamento</option>';
+
+  try {
+    if (!pixelsState.pixels.length) {
+      const data = await api('/pixels');
+      pixelsState = data;
+    }
+    for (const p of pixelsState.pixels.filter((x) => x.active)) {
+      const opt = document.createElement('option');
+      opt.value = p.id;
+      opt.textContent = p.hasToken ? p.name : p.name + ' (sem token da CAPI)';
+      select.appendChild(opt);
+    }
+    select.value = selectedId || '';
+  } catch {
+    // Migração 006 ainda não rodou: o produto salva sem rastreamento.
+  }
+}
+
 /* ---------------- modal de produto ---------------- */
 
 function openProductModal(product = null) {
@@ -504,6 +531,10 @@ function openProductModal(product = null) {
   $('#p-installments').value = product?.maxInstallments || 1;
   $('#p-image').value = product?.image || '';
   $('#p-active').checked = product ? product.active : true;
+
+  // Lista de pixels para o produto escolher. Carrega sob demanda: a aba
+  // de rastreamento pode nunca ter sido aberta nesta sessão.
+  populatePixelSelect(product?.pixelId);
 
   const checkout = product?.checkout || {};
   const methods = checkout.methods || {};
@@ -566,6 +597,7 @@ $('#product-form').addEventListener('submit', async (event) => {
     maxInstallments: Number($('#p-installments').value) || 1,
     image: $('#p-image').value,
     active: $('#p-active').checked,
+    pixelId: $('#p-pixel').value || null,
     checkout: {
       methods: {
         pix: $('#p-method-pix').checked,
@@ -978,6 +1010,222 @@ $('#gw-cards').addEventListener('submit', async (event) => {
     button.disabled = false;
     button.textContent = 'Salvar credenciais';
   }
+});
+
+/* ---------------- pixels do Meta ---------------- */
+
+let pixelsState = { pixels: [], checkoutUrl: '' };
+
+async function loadPixels() {
+  const data = await api('/pixels');
+  pixelsState = data;
+
+  const warning = $('#px-warning');
+  if (!data.schemaReady) {
+    warning.textContent =
+      'A tabela de pixels ainda não existe. Rode supabase/migrations/006-pixels.sql no ' +
+      'SQL Editor do Supabase para habilitar o rastreamento.';
+    warning.hidden = false;
+  } else if (!data.encryptionReady) {
+    warning.textContent =
+      'APP_ENCRYPTION_KEY não configurada. Sem ela o token da Conversions API seria ' +
+      'gravado em texto claro, então salvar fica bloqueado.';
+    warning.hidden = false;
+  } else {
+    warning.hidden = true;
+  }
+
+  $('#new-pixel-btn').disabled = !data.schemaReady || !data.encryptionReady;
+
+  if (!data.pixels.length) {
+    $('#pixels-list').innerHTML =
+      '<div class="empty">Nenhum pixel cadastrado. Crie um para começar a rastrear as vendas.</div>';
+    return;
+  }
+
+  $('#pixels-list').innerHTML = data.pixels
+    .map((p) => {
+      // Sem token, a nota do evento fica presa em 6-7. Vale destacar.
+      const saude = p.hasToken
+        ? '<span class="pill pill--on">Conversions API ativa</span>'
+        : '<span class="pill pill--PENDENTE">Sem token — nota limitada a ~6</span>';
+
+      return `
+        <div class="px-card">
+          <div class="px-card__top">
+            <div>
+              <div class="px-card__name">${esc(p.name)}</div>
+              <div class="px-card__id mono">${esc(p.pixelId)}</div>
+            </div>
+            <div class="px-card__tags">
+              ${saude}
+              ${p.testEventCode ? '<span class="pill pill--PENDENTE">Modo teste</span>' : ''}
+              ${p.active ? '' : '<span class="pill pill--off">Inativo</span>'}
+            </div>
+          </div>
+
+          <div class="px-card__meta">
+            ${
+              p.products.length
+                ? `Usado em: <strong>${esc(p.products.join(', '))}</strong>`
+                : 'Nenhum produto usa este pixel ainda.'
+            }
+            ${
+              p.lastEventStatus
+                ? `<br>Último evento: ${esc(p.lastEventStatus)}${
+                    p.lastEventAt ? ` · ${esc(dateTime(p.lastEventAt))}` : ''
+                  }`
+                : ''
+            }
+          </div>
+
+          <div class="px-card__actions">
+            <button class="btn btn--mini" data-snippet="${esc(p.id)}">Código da landing</button>
+            <button class="btn btn--ghost btn--mini" data-edit-pixel="${esc(p.id)}">Editar</button>
+            <button class="btn btn--danger btn--mini" data-del-pixel="${esc(p.id)}">Excluir</button>
+          </div>
+        </div>`;
+    })
+    .join('');
+}
+
+function openPixelModal(pixel = null) {
+  $('#pixel-modal-title').textContent = pixel ? 'Editar pixel' : 'Novo pixel';
+  $('#px-id').value = pixel?.id || '';
+  $('#px-name').value = pixel?.name || '';
+  $('#px-pixel-id').value = pixel?.pixelId || '';
+  $('#px-token').value = '';
+  $('#px-test').value = pixel?.testEventCode || '';
+  $('#px-token').placeholder = pixel?.hasToken ? '•••••••••• (mantém o atual)' : '';
+  $('#pixel-error').hidden = true;
+  $('#pixel-ok').hidden = true;
+
+  $('#pixel-modal').hidden = false;
+  $('#px-name').focus();
+}
+
+$('#new-pixel-btn').addEventListener('click', () => openPixelModal());
+
+$('#px-pixel-id').addEventListener('input', (e) => {
+  e.target.value = e.target.value.replace(/\D/g, '').slice(0, 20);
+});
+
+$('#pixels-list').addEventListener('click', async (event) => {
+  const edit = event.target.closest('[data-edit-pixel]');
+  if (edit) {
+    openPixelModal(pixelsState.pixels.find((p) => p.id === edit.dataset.editPixel));
+    return;
+  }
+
+  const snip = event.target.closest('[data-snippet]');
+  if (snip) {
+    const { snippet } = await api(`/pixels/${encodeURIComponent(snip.dataset.snippet)}/snippet`);
+    $('#snippet-box').value = snippet;
+    $('#snippet-modal').hidden = false;
+    return;
+  }
+
+  const del = event.target.closest('[data-del-pixel]');
+  if (del) {
+    const pixel = pixelsState.pixels.find((p) => p.id === del.dataset.delPixel);
+    if (!confirm(`Excluir o pixel "${pixel.name}"?`)) return;
+
+    try {
+      await api(`/pixels/${encodeURIComponent(pixel.id)}`, { method: 'DELETE' });
+      toast('Pixel excluído.');
+      loadPixels();
+    } catch (err) {
+      // Em uso por produtos: confirma de novo, agora sabendo a consequência.
+      if (err.message.includes('produto')) {
+        if (!confirm(`${err.message}\n\nExcluir mesmo assim?`)) return;
+        await api(`/pixels/${encodeURIComponent(pixel.id)}?force=sim`, { method: 'DELETE' });
+        toast('Pixel excluído.');
+        loadPixels();
+      } else {
+        toast(err.message, true);
+      }
+    }
+  }
+});
+
+function pixelFormBody() {
+  return {
+    name: $('#px-name').value,
+    pixelId: $('#px-pixel-id').value,
+    accessToken: $('#px-token').value,
+    testEventCode: $('#px-test').value,
+  };
+}
+
+$('#px-test-btn').addEventListener('click', async () => {
+  const id = $('#px-id').value;
+  const button = $('#px-test-btn');
+
+  if (!id) {
+    $('#pixel-error').textContent = 'Salve o pixel primeiro; depois o teste dispara um evento real.';
+    $('#pixel-error').hidden = false;
+    return;
+  }
+
+  button.disabled = true;
+  button.textContent = 'Testando…';
+
+  try {
+    const r = await api(`/pixels/${encodeURIComponent(id)}/test`, {
+      method: 'POST',
+      body: { accessToken: $('#px-token').value, testEventCode: $('#px-test').value },
+    });
+
+    $('#pixel-ok').innerHTML =
+      `Meta recebeu o evento. <strong>${r.signals.total} sinais</strong> de identificação: ` +
+      esc(r.signals.presentes.join(', ')) + '.';
+    $('#pixel-ok').hidden = false;
+    $('#pixel-error').hidden = true;
+  } catch (err) {
+    $('#pixel-error').textContent = err.message;
+    $('#pixel-error').hidden = false;
+    $('#pixel-ok').hidden = true;
+  } finally {
+    button.disabled = false;
+    button.textContent = 'Testar';
+  }
+});
+
+$('#pixel-form').addEventListener('submit', async (event) => {
+  event.preventDefault();
+
+  const id = $('#px-id').value;
+  const button = $('#px-save');
+  button.disabled = true;
+
+  try {
+    if (id) {
+      await api(`/pixels/${encodeURIComponent(id)}`, { method: 'PATCH', body: pixelFormBody() });
+      toast('Pixel atualizado.');
+    } else {
+      await api('/pixels', { method: 'POST', body: pixelFormBody() });
+      toast('Pixel criado. Agora escolha-o no produto.');
+    }
+    closeModals();
+    loadPixels();
+  } catch (err) {
+    $('#pixel-error').textContent = err.message;
+    $('#pixel-error').hidden = false;
+  } finally {
+    button.disabled = false;
+  }
+});
+
+$('#copy-snippet').addEventListener('click', async () => {
+  const button = $('#copy-snippet');
+  try {
+    await navigator.clipboard.writeText($('#snippet-box').value);
+  } catch {
+    $('#snippet-box').select();
+    document.execCommand('copy');
+  }
+  button.textContent = 'Copiado!';
+  setTimeout(() => (button.textContent = 'Copiar código'), 2200);
 });
 
 /* ---------------- auditoria ---------------- */

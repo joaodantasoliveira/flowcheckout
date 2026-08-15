@@ -39,6 +39,8 @@ export const fromRow = (row) =>
 
     pix: row.pix,
     infraction: row.infraction,
+    tracking: row.tracking || {},
+    purchaseSentAt: row.purchase_sent_at ? new Date(row.purchase_sent_at).getTime() : null,
     meta: row.meta,
 
     lastGatewayPollAt: row.last_gateway_poll_at ? new Date(row.last_gateway_poll_at).getTime() : 0,
@@ -74,7 +76,7 @@ function toRow(patch) {
   return row;
 }
 
-export async function createOrder({ product, customer, amountCents, gateway, ip, userAgent }) {
+export async function createOrder({ product, customer, amountCents, gateway, tracking, ip, userAgent }) {
   const id = `${Date.now().toString(36)}-${crypto.randomBytes(6).toString('hex')}`;
 
   const row = await dbInsert('orders', {
@@ -91,6 +93,7 @@ export async function createOrder({ product, customer, amountCents, gateway, ip,
     status: 'PENDENTE',
     paid: false,
     fulfilled: false,
+    tracking: tracking || null,
     meta: { ip, userAgent },
   });
 
@@ -141,6 +144,29 @@ export async function markOrderPaidOnce(orderId, { endToEndId = null } = {}) {
     }
   );
   return updated ? fromRow(updated) : null;
+}
+
+/**
+ * Marca o Purchase como enviado ao Meta, uma unica vez.
+ * O UPDATE so acerta linhas com purchase_sent_at nulo: se webhook e polling
+ * confirmarem juntos, o Meta nao recebe a venda em duplicidade.
+ */
+export async function markPurchaseSentOnce(orderId) {
+  try {
+    const updated = await dbUpdate(
+      'orders',
+      { id: `eq.${orderId}`, purchase_sent_at: 'is.null' },
+      { purchase_sent_at: new Date().toISOString() }
+    );
+    return Boolean(updated);
+  } catch (err) {
+    // Coluna ainda nao criada (migracao 006): nao dispara, mas nao quebra.
+    if (/purchase_sent_at/.test(err?.message || '')) {
+      console.warn('[tracking] rode a migração 006 para habilitar o envio de Purchase.');
+      return false;
+    }
+    throw err;
+  }
 }
 
 /** Marca a entrega como feita, tambem uma unica vez. */

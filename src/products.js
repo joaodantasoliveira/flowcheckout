@@ -95,6 +95,7 @@ const fromRow = (row) =>
     priceCents: Number(row.price_cents),
     maxInstallments: row.max_installments,
     active: row.active,
+    pixelId: row.pixel_id || null,
     checkout: {
       // `?? true` mantém produtos anteriores à migração 005 vendendo por PIX.
       methods: {
@@ -159,6 +160,7 @@ export async function createProduct({
   image,
   maxInstallments,
   active,
+  pixelId,
   checkout,
   success,
 }) {
@@ -173,6 +175,7 @@ export async function createProduct({
       price_cents: Math.round(Number(priceCents)),
       max_installments: Math.min(12, Math.max(1, Number(maxInstallments) || 1)),
       active: active !== false,
+      pixel_id: pixelId || null,
       ...checkoutColumns({ checkout }),
       ...successColumns({ success }),
     })
@@ -191,6 +194,7 @@ export async function updateProduct(productId, patch) {
     row.max_installments = Math.min(12, Math.max(1, Number(patch.maxInstallments) || 1));
   }
   if (patch.active !== undefined) row.active = Boolean(patch.active);
+  if (patch.pixelId !== undefined) row.pixel_id = patch.pixelId || null;
 
   Object.assign(row, checkoutColumns(patch), successColumns(patch));
 

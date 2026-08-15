@@ -41,6 +41,10 @@
       <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3.2"/><path d="M12 3v2.2M12 18.8V21M21 12h-2.2M5.2 12H3M18.4 5.6l-1.6 1.6M7.2 16.8l-1.6 1.6M18.4 18.4l-1.6-1.6M7.2 7.2 5.6 5.6"/></svg>
       <span>Configurações</span>
     </button>
+    <button class="tab" data-view="pixels">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.2"/><circle cx="12" cy="12" r="3"/><path d="M12 3.8v2M12 18.2v2M20.2 12h-2M5.8 12h-2"/></svg>
+      <span>Rastreamento</span>
+    </button>
     <button class="tab" data-view="audit">
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3.5h9L19 8v12.5H6z"/><path d="M14 3.5V8h5M9 12.5h6M9 16h4"/></svg>
       <span>Auditoria</span>
@@ -194,6 +198,25 @@
     </div>
   </section>
 
+  <!-- ================= RASTREAMENTO ================= -->
+  <section class="view" data-view="pixels">
+    <p class="hint hint--warn" id="px-warning" hidden></p>
+
+    <div class="panel">
+      <div class="panel__head">
+        <h2 class="panel__title">Pixels do Meta</h2>
+        <button class="btn" id="new-pixel-btn">Novo pixel</button>
+      </div>
+      <div class="form-panel form-panel--wide">
+        <p class="hint">
+          Cada produto escolhe qual pixel usa — o mesmo pixel pode servir várias ofertas.
+          O token da Conversions API é o que leva a nota do evento de 6 para 9+.
+        </p>
+        <div id="pixels-list"></div>
+      </div>
+    </div>
+  </section>
+
   <!-- ================= AUDITORIA ================= -->
   <section class="view" data-view="audit">
     <div class="panel">
@@ -247,6 +270,14 @@
         <input type="checkbox" id="p-active" checked />
         <span>Ativo — disponível para venda no checkout</span>
       </label>
+
+      <hr class="rule" />
+
+      <label class="lbl" for="p-pixel">Pixel do Meta</label>
+      <select class="inp" id="p-pixel"></select>
+      <p class="hint">
+        Rastreia a venda deste produto. Cadastre os pixels em <strong>Rastreamento</strong>.
+      </p>
 
       <hr class="rule" />
 
@@ -329,6 +360,70 @@
     <div id="order-detail"></div>
     <div class="modal__actions">
       <button type="button" class="btn btn--ghost" data-close>Fechar</button>
+    </div>
+  </div>
+</div>
+
+<!-- ================= MODAL DE PIXEL ================= -->
+<div class="modal" id="pixel-modal" hidden>
+  <div class="modal__backdrop" data-close></div>
+  <div class="modal__box" role="dialog" aria-modal="true" aria-labelledby="pixel-modal-title">
+    <h2 class="modal__title" id="pixel-modal-title">Novo pixel</h2>
+
+    <form id="pixel-form" autocomplete="off" novalidate>
+      <input type="hidden" id="px-id" />
+
+      <label class="lbl" for="px-name">Nome (só para você identificar)</label>
+      <input class="inp" id="px-name" maxlength="60" placeholder="Pixel principal" />
+
+      <label class="lbl" for="px-pixel-id">ID do pixel</label>
+      <input class="inp" id="px-pixel-id" inputmode="numeric" placeholder="1234567890123456" spellcheck="false" />
+      <p class="hint">Eventos Manager → Fontes de dados. É um número de 15 a 16 dígitos.</p>
+
+      <label class="lbl" for="px-token">Token da Conversions API</label>
+      <input class="inp" id="px-token" type="password" autocomplete="new-password" spellcheck="false" />
+      <p class="hint" id="px-token-hint">
+        Eventos Manager → Configurações → Gerar token de acesso. <strong>Sem ele a nota do
+        evento não passa de 6 a 7</strong>, porque e-mail e telefone só existem no servidor.
+      </p>
+
+      <label class="lbl" for="px-test">Código de teste (opcional)</label>
+      <input class="inp" id="px-test" maxlength="20" placeholder="TEST12345" spellcheck="false" />
+      <p class="hint">
+        Em Eventos de teste, no Events Manager. Com ele os eventos aparecem lá sem
+        contaminar os dados reais. Deixe vazio quando for para produção.
+      </p>
+
+      <p class="modal__error" id="pixel-error" hidden></p>
+      <p class="ok-box" id="pixel-ok" hidden></p>
+
+      <div class="modal__actions">
+        <button type="button" class="btn btn--ghost" data-close>Cancelar</button>
+        <button type="button" class="btn btn--ghost" id="px-test-btn">Testar</button>
+        <button type="submit" class="btn" id="px-save">Salvar</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- ================= MODAL DO SNIPPET ================= -->
+<div class="modal" id="snippet-modal" hidden>
+  <div class="modal__backdrop" data-close></div>
+  <div class="modal__box modal__box--wide" role="dialog" aria-modal="true">
+    <h2 class="modal__title">Código para a landing page</h2>
+
+    <p class="hint">
+      Cole antes de <code>&lt;/head&gt;</code> na sua página de vendas,
+      <strong>no lugar do pixel do Meta</strong>. Ele inicializa o pixel, dispara o
+      PageView e — o que o pixel puro não faz — leva os identificadores do clique
+      até o checkout, que está em outro domínio.
+    </p>
+
+    <textarea class="inp inp--code-box" id="snippet-box" rows="16" readonly spellcheck="false"></textarea>
+
+    <div class="modal__actions">
+      <button type="button" class="btn btn--ghost" data-close>Fechar</button>
+      <button type="button" class="btn" id="copy-snippet">Copiar código</button>
     </div>
   </div>
 </div>

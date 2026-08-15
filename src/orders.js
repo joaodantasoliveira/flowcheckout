@@ -1,7 +1,15 @@
 import { config } from './config.js';
 import { GatewayError } from './gateways/index.js';
+import { getProduct } from './products.js';
 import { getGatewayForOrder } from './settings.js';
-import { getOrder, markFulfilledOnce, markOrderPaidOnce, updateOrder } from './store.js';
+import {
+  getOrder,
+  markFulfilledOnce,
+  markOrderPaidOnce,
+  markPurchaseSentOnce,
+  updateOrder,
+} from './store.js';
+import { trackEvent } from './tracking.js';
 
 /**
  * A documentacao dos gateways e ambigua sobre a unidade do valor: alguns
@@ -40,7 +48,38 @@ export async function markPaid(orderId, { endToEndId = null, source = 'desconhec
     console.error(`[entrega] falhou para o pedido ${order.id}:`, err);
   }
 
+  // Purchase precisa sair do SERVIDOR: o comprador pode fechar a aba assim
+  // que paga, e aí o pixel do navegador nunca dispara. Aqui sempre dispara.
+  try {
+    await sendPurchaseEvent(order);
+  } catch (err) {
+    console.error(`[tracking] Purchase falhou para ${order.id}:`, err.message);
+  }
+
   return order;
+}
+
+/** Envia Purchase uma única vez, mesmo se o pedido for reprocessado. */
+async function sendPurchaseEvent(order) {
+  const primeiro = await markPurchaseSentOnce(order.id);
+  if (!primeiro) return;
+
+  const product = await getProduct(order.productId);
+  if (!product?.pixelId) return;
+
+  const result = await trackEvent({
+    order,
+    product,
+    eventName: 'Purchase',
+    eventTime: order.paidAt || Date.now(),
+  });
+
+  if (result.ok) {
+    console.log(
+      `[tracking] Purchase enviado para o pedido ${order.id} ` +
+        `com ${result.signals?.total ?? 0} sinais de identificação`
+    );
+  }
 }
 
 /**

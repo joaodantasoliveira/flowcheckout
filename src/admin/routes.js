@@ -4,6 +4,19 @@ import { fileURLToPath } from 'node:url';
 import express, { Router } from 'express';
 
 import { audit, listAudit } from '../audit.js';
+import { config } from '../config.js';
+import { hasEncryptionKey } from '../crypto-utils.js';
+import { testCredentials as testPixelCredentials } from '../meta-capi.js';
+import {
+  createPixel,
+  deletePixel,
+  getPixel,
+  getPixelWithToken,
+  listPixels,
+  updatePixel,
+  validatePixelInput,
+} from '../pixels.js';
+import { buildLandingSnippet } from '../tracking.js';
 import { getGateway } from '../gateways/index.js';
 import {
   getActiveGateway,
@@ -661,6 +674,139 @@ adminRouter.get(
     } catch {
       res.status(502).json({ error: 'Não foi possível consultar o saldo agora.' });
     }
+  })
+);
+
+/* ---------------- pixels do Meta ---------------- */
+
+adminRouter.get(
+  '/api/pixels',
+  wrap(async (req, res) => {
+    const { pixels, schemaReady } = await listPixels();
+    const products = schemaReady ? await listProducts() : [];
+
+    res.json({
+      schemaReady,
+      encryptionReady: hasEncryptionKey(),
+      checkoutUrl: config.publicUrl,
+      pixels: pixels.map((p) => ({
+        ...p,
+        // Quais produtos usam este pixel — evita apagar um que está em uso.
+        products: products.filter((prod) => prod.pixelId === p.id).map((prod) => prod.name),
+      })),
+    });
+  })
+);
+
+adminRouter.post(
+  '/api/pixels',
+  wrap(async (req, res) => {
+    const errors = validatePixelInput(req.body);
+    if (Object.keys(errors).length) {
+      return res.status(422).json({ error: Object.values(errors)[0], fields: errors });
+    }
+
+    const pixel = await createPixel(req.body);
+    await audit('pixel.criado', {
+      adminId: req.admin.id,
+      ip: req.ip,
+      detail: { id: pixel.id, pixelId: pixel.pixelId },
+    });
+
+    res.status(201).json(pixel);
+  })
+);
+
+adminRouter.patch(
+  '/api/pixels/:id',
+  wrap(async (req, res) => {
+    const existing = await getPixel(req.params.id);
+    if (!existing) return res.status(404).json({ error: 'Pixel não encontrado.' });
+
+    const errors = validatePixelInput(req.body, { partial: true });
+    if (Object.keys(errors).length) {
+      return res.status(422).json({ error: Object.values(errors)[0], fields: errors });
+    }
+
+    const pixel = await updatePixel(existing.id, req.body);
+    await audit('pixel.editado', {
+      adminId: req.admin.id,
+      ip: req.ip,
+      detail: { id: pixel.id, tokenTrocado: Boolean(req.body.accessToken) },
+    });
+
+    res.json(pixel);
+  })
+);
+
+adminRouter.delete(
+  '/api/pixels/:id',
+  wrap(async (req, res) => {
+    const existing = await getPixel(req.params.id);
+    if (!existing) return res.status(404).json({ error: 'Pixel não encontrado.' });
+
+    // Produto aponta para o pixel; apagar com ON DELETE SET NULL só zera a
+    // referência, mas o dono precisa saber que vai parar de rastrear.
+    const emUso = (await listProducts()).filter((p) => p.pixelId === existing.id);
+    if (emUso.length && req.query.force !== 'sim') {
+      return res.status(409).json({
+        error:
+          `Este pixel está em ${emUso.length} produto(s): ${emUso.map((p) => p.name).join(', ')}. ` +
+          'Eles ficarão sem rastreamento.',
+        needsConfirm: true,
+      });
+    }
+
+    await deletePixel(existing.id);
+    await audit('pixel.excluido', { adminId: req.admin.id, ip: req.ip, detail: { id: existing.id } });
+
+    res.json({ ok: true });
+  })
+);
+
+/** Dispara um PageView de teste — valida pixel + token de verdade. */
+adminRouter.post(
+  '/api/pixels/:id/test',
+  wrap(async (req, res) => {
+    const pixel = await getPixelWithToken(req.params.id);
+    if (!pixel) return res.status(404).json({ error: 'Pixel não encontrado ou inativo.' });
+
+    const token = String(req.body?.accessToken || '').trim() || pixel.accessToken;
+    if (!token) {
+      return res.status(422).json({
+        error:
+          'Sem token da Conversions API não dá para testar — e sem ele a nota do evento ' +
+          'não passa de 6 a 7, porque e-mail e telefone só existem no servidor.',
+      });
+    }
+
+    try {
+      const result = await testPixelCredentials({
+        pixelId: pixel.pixelId,
+        accessToken: token,
+        testEventCode: req.body?.testEventCode || pixel.testEventCode,
+      });
+
+      await audit('pixel.testado', { adminId: req.admin.id, ip: req.ip, detail: { id: pixel.id, ok: true } });
+      res.json({ ok: true, ...result });
+    } catch (err) {
+      await audit('pixel.testado', { adminId: req.admin.id, ip: req.ip, detail: { id: pixel.id, ok: false } });
+      res.status(400).json({ error: err.message });
+    }
+  })
+);
+
+/** Código que substitui o pixel do Meta na landing page. */
+adminRouter.get(
+  '/api/pixels/:id/snippet',
+  wrap(async (req, res) => {
+    const pixel = await getPixel(req.params.id);
+    if (!pixel) return res.status(404).json({ error: 'Pixel não encontrado.' });
+
+    res.json({
+      snippet: buildLandingSnippet({ pixel, checkoutUrl: config.publicUrl }),
+      checkoutUrl: config.publicUrl,
+    });
   })
 );
 

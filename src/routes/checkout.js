@@ -6,8 +6,20 @@ import { publicOrder, syncOrderWithGateway } from '../orders.js';
 import { defaultProductId, formatBRL, getActiveProduct } from '../products.js';
 import { rateLimit } from '../rate-limit.js';
 import { getActiveGateway } from '../settings.js';
+import { getPixel } from '../pixels.js';
 import { createOrder, getOrder, linkGatewayId, updateOrder } from '../store.js';
+import { eventIdFor, extractTracking, trackEvent } from '../tracking.js';
 import { validateCheckoutPayload } from '../validators.js';
+
+/** ID numérico do pixel — não é segredo, o navegador precisa dele. */
+async function getPixelPublicId(id) {
+  try {
+    const pixel = await getPixel(id);
+    return pixel?.active ? pixel.pixelId : null;
+  } catch {
+    return null;
+  }
+}
 
 export const checkoutRouter = Router();
 
@@ -34,6 +46,9 @@ checkoutRouter.get('/product', async (req, res, next) => {
       amountCents: product.priceCents,
       amountFormatted: formatBRL(product.priceCents),
       maxInstallments: product.maxInstallments,
+      // ID numérico do pixel: o navegador precisa dele para o PageView.
+      // Não é segredo — já aparece no HTML da landing.
+      pixelId: product.pixelId ? await getPixelPublicId(product.pixelId) : null,
       headline: product.checkout.headline,
       showSecuritySeal: product.checkout.showSecuritySeal,
       // Textos da tela de confirmação. Vazio faz o front usar o padrão.
@@ -73,11 +88,16 @@ checkoutRouter.post('/pix', createLimiter, async (req, res, next) => {
     // O preco vem do catalogo no banco, nunca do corpo da requisicao.
     const amountCents = product.priceCents;
 
+    // Identificadores de atribuição vindos da landing pela URL: cookie não
+    // atravessa domínio, então eles chegam no corpo da requisição.
+    const tracking = extractTracking(req.body, req);
+
     order = await createOrder({
       product,
       customer: data,
       amountCents,
       gateway: gateway.id,
+      tracking,
       ip: req.ip,
       userAgent: req.get('user-agent') || null,
     });
@@ -105,7 +125,19 @@ checkoutRouter.post('/pix', createLimiter, async (req, res, next) => {
         `valor=${(amountCents / 100).toFixed(2)}`
     );
 
-    res.status(201).json(publicOrder(order));
+    // InitiateCheckout pelo servidor, com e-mail e telefone já preenchidos —
+    // sinais que o pixel do navegador sozinho não teria neste momento.
+    trackEvent({ order, product, eventName: 'InitiateCheckout' }).catch(() => {});
+
+    res.status(201).json({
+      ...publicOrder(order),
+      // O navegador dispara o mesmo evento com este id; o Meta deduplica.
+      tracking: {
+        pixelId: product.pixelId ? (await getPixelPublicId(product.pixelId)) : null,
+        initiateEventId: eventIdFor(order.id, 'InitiateCheckout'),
+        purchaseEventId: eventIdFor(order.id, 'Purchase'),
+      },
+    });
   } catch (err) {
     if (order) await updateOrder(order, { status: 'FALHA' }).catch(() => {});
 
