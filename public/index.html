@@ -4,13 +4,33 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <meta name="robots" content="noindex" />
+<meta name="theme-color" content="#2B303A" />
 <title>Finalizar Compra</title>
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-<link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap" rel="stylesheet" />
+<link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700;900&display=swap" rel="stylesheet" />
 <link rel="stylesheet" href="/styles.css" />
 </head>
 <body>
+
+<div class="aurora" aria-hidden="true">
+  <span class="aurora__blob aurora__blob--1"></span>
+  <span class="aurora__blob aurora__blob--2"></span>
+  <span class="aurora__blob aurora__blob--3"></span>
+</div>
+
+<header class="topline">
+  <div class="topline__inner">
+    <span class="topline__brand" id="brand">Checkout</span>
+    <span class="topline__secure">
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <rect x="5" y="10.5" width="14" height="9.5" rx="2"/>
+        <path d="M8.2 10.5V7.6a3.8 3.8 0 0 1 7.6 0v2.9"/>
+      </svg>
+      Ambiente seguro
+    </span>
+  </div>
+</header>
 
 <main class="page">
   <div class="layout">
@@ -18,23 +38,32 @@
     <!-- ============ COLUNA ESQUERDA ============ -->
     <section class="card card--form">
 
-      <h1 class="page-title">Finalizar Compra</h1>
+      <div class="steps" id="steps" aria-label="Progresso da compra">
+        <span class="steps__item is-current" data-step="1"><i>1</i> Seus dados</span>
+        <span class="steps__line"></span>
+        <span class="steps__item" data-step="2"><i>2</i> Pagamento</span>
+        <span class="steps__line"></span>
+        <span class="steps__item" data-step="3"><i>3</i> Pronto</span>
+      </div>
+
+      <h1 class="page-title" id="page-title">Finalizar Compra</h1>
 
       <!-- ---- ETAPA 1: FORMULÁRIO ---- -->
       <div id="step-form">
         <form id="checkout-form" novalidate autocomplete="on">
 
-          <h2 class="section-title">Dados Pessoais</h2>
+          <h2 class="section-title">Dados pessoais</h2>
 
           <div class="grid">
             <div class="field">
-              <label for="name">Nome Completo</label>
+              <label for="name">Nome completo</label>
               <div class="control">
                 <svg class="icon" viewBox="0 0 24 24" aria-hidden="true">
                   <circle cx="12" cy="8" r="3.4"/><path d="M4.5 20c.6-3.8 3.8-6 7.5-6s6.9 2.2 7.5 6"/>
                 </svg>
                 <input id="name" name="name" type="text" placeholder="Seu nome completo"
                        autocomplete="name" maxlength="100" />
+                <svg class="check-mark" viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg>
               </div>
               <p class="error" data-error-for="name"></p>
             </div>
@@ -43,22 +72,24 @@
               <label for="email">E-mail</label>
               <div class="control">
                 <svg class="icon" viewBox="0 0 24 24" aria-hidden="true">
-                  <rect x="3" y="5.5" width="18" height="13" rx="2"/><path d="m3.8 7 8.2 6 8.2-6"/>
+                  <rect x="3" y="5.5" width="18" height="13" rx="2.5"/><path d="m3.8 7 8.2 6 8.2-6"/>
                 </svg>
                 <input id="email" name="email" type="email" placeholder="seu@email.com"
                        autocomplete="email" maxlength="254" />
+                <svg class="check-mark" viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg>
               </div>
               <p class="error" data-error-for="email"></p>
             </div>
 
             <div class="field">
-              <label for="document">CPF/CNPJ</label>
+              <label for="document">CPF / CNPJ</label>
               <div class="control">
                 <svg class="icon" viewBox="0 0 24 24" aria-hidden="true">
-                  <rect x="2.5" y="5" width="19" height="14" rx="2"/><path d="M2.5 10h19"/>
+                  <rect x="2.5" y="5" width="19" height="14" rx="2.5"/><path d="M2.5 10h19"/>
                 </svg>
                 <input id="document" name="document" type="text" inputmode="numeric"
                        placeholder="000.000.000-00" maxlength="18" />
+                <svg class="check-mark" viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg>
               </div>
               <p class="error" data-error-for="document"></p>
             </div>
@@ -71,63 +102,70 @@
                 </svg>
                 <input id="phone" name="phone" type="tel" inputmode="numeric"
                        placeholder="+55 (11) 99999-9999" autocomplete="tel" maxlength="20" />
+                <svg class="check-mark" viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg>
               </div>
               <p class="error" data-error-for="phone"></p>
             </div>
           </div>
 
-          <h2 class="section-title section-title--pay">Método de Pagamento</h2>
+          <h2 class="section-title section-title--pay" id="methods-title">Forma de pagamento</h2>
 
-          <div class="methods" role="radiogroup" aria-label="Método de Pagamento">
-            <button type="button" class="method is-selected" data-method="pix"
-                    role="radio" aria-checked="true">
-              <span class="method__name">PIX</span>
-              <span class="method__desc">Aprovação imediata</span>
-              <span class="method__price" data-price>—</span>
-            </button>
-
-            <button type="button" class="method" data-method="card"
-                    role="radio" aria-checked="false">
-              <span class="method__name">Cartão de Crédito</span>
-              <span class="method__desc" data-card-desc>Em até 1x</span>
-              <span class="method__price" data-price>—</span>
-            </button>
-          </div>
+          <div class="methods" id="methods" role="radiogroup" aria-label="Forma de pagamento"></div>
 
           <p class="form-alert" id="form-alert" hidden></p>
 
           <button type="submit" class="submit" id="submit-btn">
             <span class="submit__label">Gerar PIX</span>
             <span class="spinner" aria-hidden="true"></span>
+            <svg class="submit__arrow" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12h15m-6-6 6 6-6 6"/></svg>
           </button>
+
+          <p class="reassure">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <rect x="5" y="10.5" width="14" height="9.5" rx="2"/>
+              <path d="M8.2 10.5V7.6a3.8 3.8 0 0 1 7.6 0v2.9"/>
+            </svg>
+            Seus dados são enviados com criptografia de ponta a ponta
+          </p>
         </form>
       </div>
 
       <!-- ---- ETAPA 2: PAGAMENTO PIX ---- -->
       <div id="step-pix" hidden>
-        <h2 class="section-title">Pague com PIX para concluir</h2>
+        <h2 class="section-title">Escaneie para pagar</h2>
 
         <div class="pix">
           <div class="pix__qr">
-            <img id="qr-img" alt="QR Code PIX" />
+            <div class="pix__qr-frame">
+              <img id="qr-img" alt="QR Code PIX" />
+              <span class="pix__scan" aria-hidden="true"></span>
+            </div>
+            <p class="pix__timer">
+              Expira em <strong id="timer">30:00</strong>
+            </p>
           </div>
 
           <div class="pix__side">
             <ol class="pix__steps">
-              <li>Abra o app do seu banco e entre na área PIX.</li>
-              <li>Escolha <strong>Pagar com QR Code</strong> ou <strong>PIX Copia e Cola</strong>.</li>
-              <li>Confirme o valor de <strong data-price-inline>—</strong> e finalize.</li>
+              <li><span>1</span> Abra o app do seu banco na área PIX</li>
+              <li><span>2</span> Escolha <strong>Pagar com QR Code</strong> ou <strong>Copia e Cola</strong></li>
+              <li><span>3</span> Confirme <strong data-price-inline>—</strong> e finalize</li>
             </ol>
 
             <label class="pix__label" for="copy-paste">PIX Copia e Cola</label>
             <textarea id="copy-paste" readonly rows="3"></textarea>
-            <button type="button" class="submit submit--copy" id="copy-btn">Copiar código PIX</button>
+            <button type="button" class="submit submit--copy" id="copy-btn">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <rect x="9" y="9" width="11" height="11" rx="2"/><path d="M15 5H6a1 1 0 0 0-1 1v9"/>
+              </svg>
+              <span>Copiar código PIX</span>
+            </button>
 
             <div class="pix__status" id="pix-status">
               <span class="dot"></span>
               <span id="pix-status-text">Aguardando pagamento…</span>
             </div>
-            <p class="pix__timer">Este código expira em <strong id="timer">30:00</strong></p>
+
             <button type="button" class="linkish" id="back-btn">Voltar e corrigir meus dados</button>
           </div>
         </div>
@@ -166,28 +204,48 @@
       <h2 class="section-title">Resumo do pedido</h2>
 
       <div class="product">
-        <img class="product__img" id="product-img" alt="" />
+        <div class="product__thumb">
+          <img id="product-img" alt="" />
+        </div>
         <div>
           <p class="product__name" id="product-name">—</p>
           <p class="product__sub" id="product-sub">—</p>
         </div>
       </div>
 
-      <hr class="rule" />
+      <div class="summary-lines">
+        <div class="summary-line">
+          <span>Subtotal</span>
+          <span data-price>—</span>
+        </div>
+        <div class="summary-line summary-line--muted">
+          <span>Desconto</span>
+          <span>—</span>
+        </div>
+      </div>
 
       <div class="total">
-        <span class="total__label">Total a pagar</span>
+        <span class="total__label">Total</span>
         <span class="total__value" data-price>—</span>
       </div>
 
-      <hr class="rule" />
+      <ul class="perks" id="perks">
+        <li>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg>
+          Acesso imediato após a confirmação
+        </li>
+        <li>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg>
+          Pagamento processado com criptografia
+        </li>
+      </ul>
 
-      <p class="secure">
+      <p class="secure" id="security-seal">
         <svg class="secure__icon" viewBox="0 0 24 24" aria-hidden="true">
-          <rect x="5" y="10.5" width="14" height="9.5" rx="1.8"/>
-          <path d="M8.2 10.5V7.6a3.8 3.8 0 0 1 7.6 0v2.9"/>
+          <path d="M12 3.5 5 6.2v5c0 4.3 2.9 8.3 7 9.3 4.1-1 7-5 7-9.3v-5L12 3.5Z"/>
+          <path d="m9 12 2.2 2.2L15.5 10"/>
         </svg>
-        Pagamento seguro processado com criptografia
+        Compra protegida — seus dados nunca são compartilhados
       </p>
     </aside>
 

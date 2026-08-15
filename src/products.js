@@ -25,8 +25,38 @@ async function comMigracao004(fn) {
       erro.status = 422;
       throw erro;
     }
+
+    if (/method_(pix|card)|checkout_headline|show_security_seal/.test(err?.message || '')) {
+      const erro = new Error(
+        'A personalização do checkout precisa da migração 005. ' +
+          'Rode supabase/migrations/005-checkout-personalizado.sql no SQL Editor do Supabase.'
+      );
+      erro.status = 422;
+      throw erro;
+    }
     throw err;
   }
+}
+
+/** Campos de personalização do checkout, normalizados para gravar. */
+function checkoutColumns(patch = {}) {
+  const checkout = patch.checkout;
+  if (!checkout) return {};
+
+  const row = {};
+
+  if (checkout.methods) {
+    if (checkout.methods.pix !== undefined) row.method_pix = Boolean(checkout.methods.pix);
+    if (checkout.methods.card !== undefined) row.method_card = Boolean(checkout.methods.card);
+  }
+  if (checkout.headline !== undefined) {
+    row.checkout_headline = String(checkout.headline).trim() || null;
+  }
+  if (checkout.showSecuritySeal !== undefined) {
+    row.show_security_seal = Boolean(checkout.showSecuritySeal);
+  }
+
+  return row;
 }
 
 /** Campos da tela de obrigado, normalizados para gravar. */
@@ -65,6 +95,15 @@ const fromRow = (row) =>
     priceCents: Number(row.price_cents),
     maxInstallments: row.max_installments,
     active: row.active,
+    checkout: {
+      // `?? true` mantém produtos anteriores à migração 005 vendendo por PIX.
+      methods: {
+        pix: row.method_pix ?? true,
+        card: row.method_card ?? false,
+      },
+      headline: row.checkout_headline || '',
+      showSecuritySeal: row.show_security_seal ?? true,
+    },
     success: {
       title: row.success_title || '',
       message: row.success_message || '',
@@ -120,6 +159,7 @@ export async function createProduct({
   image,
   maxInstallments,
   active,
+  checkout,
   success,
 }) {
   const id = await uniqueId(slugify(name));
@@ -133,6 +173,7 @@ export async function createProduct({
       price_cents: Math.round(Number(priceCents)),
       max_installments: Math.min(12, Math.max(1, Number(maxInstallments) || 1)),
       active: active !== false,
+      ...checkoutColumns({ checkout }),
       ...successColumns({ success }),
     })
   );
@@ -151,7 +192,7 @@ export async function updateProduct(productId, patch) {
   }
   if (patch.active !== undefined) row.active = Boolean(patch.active);
 
-  Object.assign(row, successColumns(patch));
+  Object.assign(row, checkoutColumns(patch), successColumns(patch));
 
   row.updated_at = new Date().toISOString();
 
@@ -210,6 +251,19 @@ export function validateProductInput(body = {}, { partial = false } = {}) {
     // Caminho local ou https. Bloqueia javascript:, data: e http em texto claro.
     if (image && !/^\/[\w\-./]*$/.test(image) && !/^https:\/\/[\w\-.]+\/\S*$/.test(image)) {
       errors.image = 'Use um caminho local (/img/...) ou uma URL https.';
+    }
+  }
+
+  if (body.checkout) {
+    const { methods, headline = '' } = body.checkout;
+
+    if (String(headline).length > 60) {
+      errors.checkoutHeadline = 'Título deve ter até 60 caracteres.';
+    }
+
+    // Produto sem forma de pagamento nenhuma é produto que não vende.
+    if (methods && !methods.pix && !methods.card) {
+      errors.methods = 'Deixe ao menos uma forma de pagamento ativa.';
     }
   }
 

@@ -34,10 +34,18 @@ checkoutRouter.get('/product', async (req, res, next) => {
       amountCents: product.priceCents,
       amountFormatted: formatBRL(product.priceCents),
       maxInstallments: product.maxInstallments,
+      headline: product.checkout.headline,
+      showSecuritySeal: product.checkout.showSecuritySeal,
       // Textos da tela de confirmação. Vazio faz o front usar o padrão.
       success: product.success,
-      // Ambos os gateways integrados processam apenas PIX.
-      methods: { pix: true, card: false },
+      methods: {
+        pix: product.checkout.methods.pix,
+        // Nenhum gateway integrado processa cartão. Se o produto habilita,
+        // o método aparece marcado como indisponível — a flag abaixo evita
+        // que o front prometa algo que o backend não consegue cumprir.
+        card: product.checkout.methods.card,
+        cardSupported: false,
+      },
     });
   } catch (err) {
     next(err);

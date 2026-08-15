@@ -187,6 +187,33 @@
 
       <hr class="rule" />
 
+      <h3 class="modal__section">Página de checkout</h3>
+      <p class="hint">O que aparece para o comprador nesta oferta.</p>
+
+      <label class="lbl">Formas de pagamento</label>
+      <label class="check">
+        <input type="checkbox" id="p-method-pix" checked />
+        <span>PIX — aprovação imediata</span>
+      </label>
+      <label class="check">
+        <input type="checkbox" id="p-method-card" />
+        <span>Cartão de crédito</span>
+      </label>
+      <p class="hint" id="card-warning" hidden>
+        Nenhum gateway integrado processa cartão hoje. Se ativar, a opção aparece
+        marcada como <strong>Indisponível</strong> — o comprador vê, mas não consegue usar.
+      </p>
+
+      <label class="lbl" for="p-headline">Título da página</label>
+      <input class="inp" id="p-headline" maxlength="60" placeholder="Finalizar Compra" />
+
+      <label class="check">
+        <input type="checkbox" id="p-seal" checked />
+        <span>Exibir selo de compra protegida no resumo</span>
+      </label>
+
+      <hr class="rule" />
+
       <h3 class="modal__section">Tela de obrigado</h3>
       <p class="hint">
         O que o comprador vê depois do pagamento. Deixe em branco para usar o texto padrão.

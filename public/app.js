@@ -126,8 +126,20 @@ function validateAll() {
   }
   return ok;
 }
+/* ---------------- produto e métodos ---------------- */
 
-/* ---------------- produto ---------------- */
+const METHOD_INFO = {
+  pix: {
+    name: 'PIX',
+    desc: 'Aprovação imediata',
+    icon: '<path d="m12 3.6 8.4 8.4-8.4 8.4L3.6 12z"/><path d="M8.2 8.2 12 12l3.8-3.8M8.2 15.8 12 12l3.8 3.8"/>',
+  },
+  card: {
+    name: 'Cartão de Crédito',
+    desc: null, // preenchido com o parcelamento do produto
+    icon: '<rect x="2.5" y="5" width="19" height="14" rx="2.5"/><path d="M2.5 10h19"/>',
+  },
+};
 
 async function loadProduct() {
   const params = new URLSearchParams(location.search);
@@ -143,36 +155,101 @@ async function loadProduct() {
   $('#product-sub').textContent = product.subtitle;
   $('#product-img').src = product.image;
   $('#product-img').alt = product.name;
+  $('#brand').textContent = product.name;
   document.title = `${product.name} — Finalizar Compra`;
+
+  if (product.headline) $('#page-title').textContent = product.headline;
+  if (product.showSecuritySeal === false) $('#security-seal').hidden = true;
 
   $$('[data-price]').forEach((el) => (el.textContent = product.amountFormatted));
   $$('[data-price-inline]').forEach((el) => (el.textContent = product.amountFormatted));
-  $('[data-card-desc]').textContent = `Em até ${product.maxInstallments}x`;
 
-  if (!product.methods.card) {
-    const card = $('.method[data-method="card"]');
-    card.classList.add('is-disabled');
-    card.setAttribute('aria-disabled', 'true');
-    card.insertAdjacentHTML('beforeend', '<span class="method__tag">Indisponível</span>');
-  }
+  renderMethods(product);
+}
+
+/**
+ * Monta os métodos habilitados para ESTE produto.
+ * Se o produto oferece só PIX, o cartão nem aparece — melhor do que exibir
+ * uma opção morta que o comprador tenta clicar.
+ */
+function renderMethods(product) {
+  const enabled = Object.entries(product.methods)
+    .filter(([key, on]) => on && METHOD_INFO[key])
+    .map(([key]) => key);
+
+  // O cartão só é clicável se algum gateway souber processá-lo.
+  const usable = (key) => (key === 'card' ? product.methods.cardSupported === true : true);
+
+  const first = enabled.find(usable) || enabled[0];
+  state.method = first;
+
+  const container = $('#methods');
+  container.classList.toggle('methods--duo', enabled.length > 1);
+
+  container.innerHTML = enabled
+    .map((key) => {
+      const info = METHOD_INFO[key];
+      const desc = key === 'card' ? `Em até ${product.maxInstallments}x` : info.desc;
+      const blocked = !usable(key);
+
+      return `
+        <button type="button" role="radio"
+                class="method ${key === first ? 'is-selected' : ''} ${blocked ? 'is-disabled' : ''}"
+                data-method="${key}"
+                aria-checked="${key === first}"
+                ${blocked ? 'aria-disabled="true"' : ''}>
+          <span class="method__icon">
+            <svg viewBox="0 0 24 24" aria-hidden="true">${info.icon}</svg>
+          </span>
+          <span class="method__body">
+            <span class="method__name">${info.name}</span>
+            <span class="method__desc">${desc}</span>
+          </span>
+          <span class="method__price">${product.amountFormatted}</span>
+          <span class="method__radio"></span>
+          ${blocked ? '<span class="method__tag">Indisponível</span>' : ''}
+        </button>`;
+    })
+    .join('');
+
+  // Mesmo com um método só o bloco fica visível: confirma ao comprador
+  // como ele vai pagar, e é o que checkouts de referência fazem.
+  updateSubmitLabel();
+}
+
+function updateSubmitLabel() {
+  $('.submit__label').textContent = state.method === 'pix' ? 'Gerar PIX' : 'Pagar com Cartão';
 }
 
 /* ---------------- seleção de método ---------------- */
 
-$$('.method').forEach((btn) => {
-  btn.addEventListener('click', () => {
-    if (btn.classList.contains('is-disabled')) {
-      showAlert('Cartão de crédito indisponível no momento. Conclua com PIX — a aprovação é imediata.');
-      return;
-    }
-    $$('.method').forEach((el) => {
-      el.classList.toggle('is-selected', el === btn);
-      el.setAttribute('aria-checked', String(el === btn));
-    });
-    state.method = btn.dataset.method;
-    $('.submit__label').textContent = state.method === 'pix' ? 'Gerar PIX' : 'Pagar com Cartão';
+$('#methods').addEventListener('click', (event) => {
+  const button = event.target.closest('.method');
+  if (!button) return;
+
+  if (button.classList.contains('is-disabled')) {
+    showAlert('Cartão de crédito indisponível no momento. Conclua com PIX — a aprovação é imediata.');
+    return;
+  }
+
+  $$('.method').forEach((el) => {
+    el.classList.toggle('is-selected', el === button);
+    el.setAttribute('aria-checked', String(el === button));
   });
+
+  state.method = button.dataset.method;
+  updateSubmitLabel();
 });
+
+/* ---------------- indicador de etapas ---------------- */
+
+function setStep(current) {
+  $$('.steps__item').forEach((item) => {
+    const step = Number(item.dataset.step);
+    item.classList.toggle('is-current', step === current);
+    item.classList.toggle('is-done', step < current);
+  });
+}
 
 /* ---------------- máscaras ---------------- */
 
@@ -187,9 +264,9 @@ Object.keys(RULES).forEach((name) => {
   const input = $(`#${name}`);
   input.addEventListener('blur', () => setFieldError(name, RULES[name](input.value)));
   input.addEventListener('input', () => {
-    if (input.closest('.field').classList.contains('has-error')) {
-      setFieldError(name, RULES[name](input.value));
-    }
+    const field = input.closest('.field');
+    if (field.classList.contains('has-error')) setFieldError(name, RULES[name](input.value));
+    field.classList.toggle('is-valid', input.value.trim() !== '' && !RULES[name](input.value));
   });
 });
 
@@ -272,6 +349,7 @@ function renderPix(order) {
   $('#step-pix').hidden = false;
   window.scrollTo({ top: 0, behavior: 'smooth' });
 
+  setStep(2);
   startTimer(order.pix.expiresAt);
   startPolling();
 }
@@ -294,6 +372,7 @@ $('#copy-btn').addEventListener('click', async () => {
 $('#back-btn').addEventListener('click', () => {
   stopTimers();
   state.order = null;
+  setStep(1);
   $('#step-pix').hidden = true;
   $('#step-form').hidden = false;
 });
@@ -389,6 +468,7 @@ function renderSuccess(order) {
   }
 
   $('#done-order').textContent = order.id;
+  setStep(3);
   $('#step-pix').hidden = true;
   $('#step-done').hidden = false;
   window.scrollTo({ top: 0, behavior: 'smooth' });

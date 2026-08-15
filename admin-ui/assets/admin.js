@@ -138,33 +138,138 @@ async function loadOverview() {
     }
   `;
 
-  const peak = Math.max(1, ...daily.map((d) => d.cents));
-  $('#chart').innerHTML = daily
-    .map((day) => {
-      const height = Math.round((day.cents / peak) * 100);
-      const label = day.date.slice(8) + '/' + day.date.slice(5, 7);
-      return `<div class="bar" title="${esc(label)} — ${esc(brl(day.cents))} (${day.count})">
-                <div class="bar__fill" style="height:${height}%"></div>
-                <div class="bar__day">${esc(day.date.slice(8))}</div>
-              </div>`;
-    })
-    .join('');
+  renderWaveChart(daily);
 
   $('#top-products').innerHTML = topProducts.length
     ? topProducts
-        .map(
-          (p) => `<div class="ranked__row">
-                    <div>
+        .map((p, i, arr) => {
+          const share = Math.max(6, Math.round((p.cents / arr[0].cents) * 100));
+          return `<div class="ranked__row">
+                    <div style="flex:1;min-width:0">
                       <div class="ranked__name">${esc(p.name)}</div>
                       <div class="ranked__meta">${p.count} ${p.count === 1 ? 'venda' : 'vendas'}</div>
+                      <div class="ranked__bar" style="width:${share}%"></div>
                     </div>
                     <div class="ranked__value">${esc(brl(p.cents))}</div>
-                  </div>`
-        )
+                  </div>`;
+        })
         .join('')
     : '<div class="empty">Nenhuma venda registrada ainda.</div>';
 
   renderOrderTable($('#recent-table'), recent, { compact: true });
+}
+
+/* ---------------- gráfico de onda ---------------- */
+
+/**
+ * Curva suave passando pelos pontos (Catmull-Rom convertido para Bézier
+ * cúbica). Um polyline reto ficaria anguloso; a tensão baixa evita que a
+ * curva "estoure" acima do topo quando um dia destoa dos vizinhos.
+ */
+function smoothPath(points, tension = 0.22) {
+  if (points.length < 2) return '';
+
+  let d = `M ${points[0].x} ${points[0].y}`;
+
+  for (let i = 0; i < points.length - 1; i++) {
+    const p0 = points[i - 1] || points[i];
+    const p1 = points[i];
+    const p2 = points[i + 1];
+    const p3 = points[i + 2] || p2;
+
+    d +=
+      ` C ${p1.x + (p2.x - p0.x) * tension} ${p1.y + (p2.y - p0.y) * tension},` +
+      ` ${p2.x - (p3.x - p1.x) * tension} ${p2.y - (p3.y - p1.y) * tension},` +
+      ` ${p2.x} ${p2.y}`;
+  }
+
+  return d;
+}
+
+function renderWaveChart(daily) {
+  const host = $('#chart');
+  const W = 760;
+  const H = 210;
+  const padY = 26;
+
+  const peak = Math.max(1, ...daily.map((d) => d.cents));
+  const step = daily.length > 1 ? W / (daily.length - 1) : W;
+
+  const points = daily.map((d, i) => ({
+    x: i * step,
+    y: H - padY - (d.cents / peak) * (H - padY * 2),
+    ...d,
+  }));
+
+  const line = smoothPath(points);
+  const area = `${line} L ${W} ${H} L 0 ${H} Z`;
+
+  const grid = [0, 0.25, 0.5, 0.75, 1]
+    .map((t) => {
+      const y = padY + t * (H - padY * 2);
+      return `<line x1="0" y1="${y}" x2="${W}" y2="${y}" />`;
+    })
+    .join('');
+
+  // Rótulo a cada 2 dias: 14 datas seguidas viram borrão.
+  const labels = points
+    .map((p, i) => (i % 2 === 0 ? `<text class="chart__label" x="${p.x}" y="${H + 14}">${p.date.slice(8)}</text>` : ''))
+    .join('');
+
+  const hits = points
+    .map(
+      (p, i) => `
+      <rect class="chart__hit" x="${p.x - step / 2}" y="0" width="${step}" height="${H}"
+            data-i="${i}"></rect>
+      <circle class="chart__dot" cx="${p.x}" cy="${p.y}" r="4.5"></circle>`
+    )
+    .join('');
+
+  host.innerHTML = `
+    <svg viewBox="0 -6 ${W} ${H + 26}" preserveAspectRatio="none" role="img"
+         aria-label="Receita dos últimos 14 dias">
+      <defs>
+        <linearGradient id="waveFill" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%"   stop-color="#1fa564" stop-opacity=".55"/>
+          <stop offset="55%"  stop-color="#D2D68D" stop-opacity=".14"/>
+          <stop offset="100%" stop-color="#1fa564" stop-opacity="0"/>
+        </linearGradient>
+        <linearGradient id="waveStroke" x1="0" y1="0" x2="1" y2="0">
+          <stop offset="0%"   stop-color="#1fa564"/>
+          <stop offset="55%"  stop-color="#D2D68D"/>
+          <stop offset="100%" stop-color="#7ff0b6"/>
+        </linearGradient>
+      </defs>
+
+      <g class="chart__grid">${grid}</g>
+      <path class="chart__area" d="${area}" fill="url(#waveFill)"></path>
+      <path class="chart__line" d="${line}"></path>
+      ${labels}
+      ${hits}
+    </svg>
+    <div class="chart__tip" id="chart-tip"></div>
+  `;
+
+  // Tooltip seguindo o ponto mais próximo.
+  const tip = $('#chart-tip');
+  const svg = host.querySelector('svg');
+
+  host.querySelectorAll('.chart__hit').forEach((hit) => {
+    hit.addEventListener('mouseenter', () => {
+      const p = points[Number(hit.dataset.i)];
+      const box = svg.getBoundingClientRect();
+      const hostBox = host.getBoundingClientRect();
+
+      tip.innerHTML = `<b>${esc(brl(p.cents))}</b> · ${p.count} ${p.count === 1 ? 'venda' : 'vendas'}<br>${esc(
+        new Date(p.date + 'T12:00:00').toLocaleDateString('pt-BR', { day: '2-digit', month: 'short' })
+      )}`;
+      tip.style.left = `${box.left - hostBox.left + (p.x / W) * box.width}px`;
+      tip.style.top = `${box.top - hostBox.top + (p.y / (H + 20)) * box.height}px`;
+      tip.classList.add('is-on');
+    });
+
+    hit.addEventListener('mouseleave', () => tip.classList.remove('is-on'));
+  });
 }
 
 /* ---------------- produtos ---------------- */
@@ -252,6 +357,14 @@ function openProductModal(product = null) {
   $('#p-image').value = product?.image || '';
   $('#p-active').checked = product ? product.active : true;
 
+  const checkout = product?.checkout || {};
+  const methods = checkout.methods || {};
+  $('#p-method-pix').checked = methods.pix !== false;
+  $('#p-method-card').checked = methods.card === true;
+  $('#p-headline').value = checkout.headline || '';
+  $('#p-seal').checked = checkout.showSecuritySeal !== false;
+  $('#card-warning').hidden = !$('#p-method-card').checked;
+
   const success = product?.success || {};
   $('#p-success-title').value = success.title || '';
   $('#p-success-message').value = success.message || '';
@@ -265,6 +378,20 @@ function openProductModal(product = null) {
 }
 
 $('#new-product-btn').addEventListener('click', () => openProductModal());
+
+$('#p-method-card').addEventListener('change', (e) => {
+  $('#card-warning').hidden = !e.target.checked;
+});
+
+// Desmarcar as duas deixaria o produto sem como ser pago.
+$('#product-form').addEventListener('change', (event) => {
+  if (!event.target.matches('#p-method-pix, #p-method-card')) return;
+
+  if (!$('#p-method-pix').checked && !$('#p-method-card').checked) {
+    event.target.checked = true;
+    toast('Mantenha ao menos uma forma de pagamento ativa.', true);
+  }
+});
 
 $('#p-price').addEventListener('blur', (e) => {
   const cents = parseCents(e.target.value);
@@ -291,6 +418,14 @@ $('#product-form').addEventListener('submit', async (event) => {
     maxInstallments: Number($('#p-installments').value) || 1,
     image: $('#p-image').value,
     active: $('#p-active').checked,
+    checkout: {
+      methods: {
+        pix: $('#p-method-pix').checked,
+        card: $('#p-method-card').checked,
+      },
+      headline: $('#p-headline').value,
+      showSecuritySeal: $('#p-seal').checked,
+    },
     success: {
       title: $('#p-success-title').value,
       message: $('#p-success-message').value,
