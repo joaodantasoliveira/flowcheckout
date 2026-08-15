@@ -12,6 +12,28 @@ import { createOrder, getOrder, linkGatewayId, recordPageView, updateOrder } fro
 import { eventIdFor, extractTracking, trackEvent } from '../tracking.js';
 import { validateCheckoutPayload } from '../validators.js';
 
+/**
+ * Corpo do beacon, venha como vier.
+ *
+ * O mesmo POST chega em formatos diferentes conforme o ambiente: objeto já
+ * parseado (application/json), string (express.text) ou Buffer — a Vercel
+ * consome o stream antes do Express e entrega os bytes crus quando o tipo
+ * nao e JSON. Tratar so string fazia a visita da landing sumir em produção
+ * e funcionar no local.
+ */
+function parseBeaconBody(raw) {
+  if (!raw) return null;
+  if (typeof raw === 'object' && !Buffer.isBuffer(raw)) return raw;
+
+  const texto = Buffer.isBuffer(raw) ? raw.toString('utf8') : String(raw);
+
+  try {
+    return JSON.parse(texto);
+  } catch {
+    return null;
+  }
+}
+
 /** ID numérico do pixel — não é segredo, o navegador precisa dele. */
 async function getPixelPublicId(id) {
   try {
@@ -101,15 +123,8 @@ checkoutRouter.post('/view', viewLimiter, async (req, res) => {
   res.status(204).end();
 
   try {
-    // sendBeacon manda text/plain; o express.json() não parseia isso.
-    let body = req.body;
-    if (typeof body === 'string') {
-      try {
-        body = JSON.parse(body);
-      } catch {
-        return;
-      }
-    }
+    const body = parseBeaconBody(req.body);
+    if (!body) return;
 
     const productId = String(body?.productId || '').slice(0, 80);
     const sessionId = String(body?.sessionId || '').slice(0, 60);
