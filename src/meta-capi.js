@@ -74,9 +74,19 @@ export function buildUserData({ customer = {}, tracking = {}, address = null, or
     fn: [hashName(primeiro)],
     ln: [hashName(resto.join(' '))],
     country: [sha256('br')],
-    // external_id costura os eventos da landing com os do checkout.
-    // Prioriza o id gerado na landing; sem ele, usa o id do pedido.
-    external_id: [sha256(clean(tracking.externalId || orderId || ''))],
+    /**
+     * external_id aceita VÁRIOS valores, e cada um é uma chance a mais de
+     * casar. Mandamos dois:
+     *   1. o id gerado na landing — costura o visitante com o comprador
+     *   2. o CPF — identifica a MESMA pessoa em compras futuras, mesmo que
+     *      ela troque de navegador, de aparelho ou de e-mail
+     * O CPF não sai daqui em texto claro: vai com hash, como todo o resto.
+     */
+    external_id: [
+      tracking.externalId ? sha256(clean(tracking.externalId)) : null,
+      hashDocument(customer.document),
+      orderId ? sha256(clean(orderId)) : null,
+    ],
     client_ip_address: tracking.ip || undefined,
     client_user_agent: tracking.userAgent || undefined,
     fbp: tracking.fbp || undefined,
