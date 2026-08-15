@@ -223,7 +223,7 @@ export async function sendEvent({
 export async function testCredentials({ pixelId, accessToken, testEventCode }) {
   const userData = buildUserData({
     customer: { name: 'Teste Silva', email: 'teste@exemplo.com', phone: '11999999999' },
-    tracking: { ip: '127.0.0.1', userAgent: 'flowcheckout-teste' },
+    tracking: { ip: '127.0.0.1', userAgent: 'gocheckout-teste' },
     orderId: `teste-${Date.now()}`,
   });
 

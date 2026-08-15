@@ -1,5 +1,5 @@
 {
-  "name": "flowcheckout",
+  "name": "gocheckout",
   "version": "1.0.0",
   "description": "Checkout PIX próprio com gateway MisticPay, painel administrativo e banco Supabase",
   "private": true,

@@ -142,7 +142,7 @@ export function buildLandingSnippet({ pixel, checkoutUrl }) {
   const base = checkoutUrl || config.publicUrl;
   const host = new URL(base).host;
 
-  return `<!-- FlowCheckout · rastreamento Meta (${pixel.name}) -->
+  return `<!-- GoCheckout · rastreamento Meta (${pixel.name}) -->
 <!-- Substitui o pixel padrão do Meta. Cole antes de </head> -->
 <script>
 (function (w, d) {
@@ -231,10 +231,10 @@ export function buildLandingSnippet({ pixel, checkoutUrl }) {
     if (a && a.href.indexOf(CHECKOUT_HOST) !== -1) a.href = decorar(a.href);
   }, true);
 
-  w.flowCheckoutDecorate = decorar;
+  w.goCheckoutDecorate = decorar;
 })(window, document);
 </script>
 <noscript><img height="1" width="1" style="display:none"
   src="https://www.facebook.com/tr?id=${pixel.pixelId}&ev=PageView&noscript=1"/></noscript>
-<!-- /FlowCheckout -->`;
+<!-- /GoCheckout -->`;
 }

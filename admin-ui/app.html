@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <meta name="robots" content="noindex, nofollow, noarchive" />
 <meta name="referrer" content="no-referrer" />
-<title>Painel</title>
+<title>GoCheckout</title>
 <link rel="icon" href="data:," />
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -21,7 +21,7 @@
     <span class="side__logo" aria-hidden="true">
       <svg viewBox="0 0 24 24"><path d="m12 3.6 8.4 8.4-8.4 8.4L3.6 12z"/><path d="M8.2 8.2 12 12l3.8-3.8M8.2 15.8 12 12l3.8 3.8"/></svg>
     </span>
-    <span class="side__name">Painel</span>
+    <span class="side__name">GoCheckout</span>
   </div>
 
   <nav class="side__nav" id="tabs" aria-label="Seções">
@@ -487,6 +487,53 @@
         <button type="submit" class="btn" id="px-save">Salvar</button>
       </div>
     </form>
+  </div>
+</div>
+
+<!-- ================= MODAL DA UTM ================= -->
+<div class="modal" id="utm-modal" hidden>
+  <div class="modal__backdrop" data-close></div>
+  <div class="modal__box modal__box--wide" role="dialog" aria-modal="true">
+    <h2 class="modal__title" id="utm-title">Rastreamento do anúncio</h2>
+
+    <h3 class="modal__section">1. Parâmetros de URL</h3>
+    <p class="hint">
+      Cole no campo <strong>Parâmetros de URL</strong> do anúncio, em
+      <em>Rastreamento</em> (nível do anúncio). Serve tanto para anúncio que vai
+      para a landing quanto direto para o checkout.
+    </p>
+    <textarea class="inp inp--code-box" id="utm-params" rows="3" readonly spellcheck="false"></textarea>
+    <div class="form-actions">
+      <button type="button" class="btn" data-copy-utm="utm-params">Copiar parâmetros</button>
+    </div>
+
+    <hr class="rule" />
+
+    <h3 class="modal__section">2. Link deste produto</h3>
+    <p class="hint">
+      É para onde o botão da sua landing page deve apontar. O código da landing
+      carimba os identificadores nele automaticamente.
+    </p>
+    <textarea class="inp inp--code-box" id="utm-link" rows="2" readonly spellcheck="false"></textarea>
+    <div class="form-actions">
+      <button type="button" class="btn btn--ghost" data-copy-utm="utm-link">Copiar link</button>
+    </div>
+
+    <hr class="rule" />
+
+    <h3 class="modal__section">3. Anúncio direto para o checkout</h3>
+    <p class="hint">
+      Só se você <strong>não</strong> usar landing page. Nesse caso o anúncio aponta
+      para esta URL, e os parâmetros do passo 1 continuam necessários.
+    </p>
+    <textarea class="inp inp--code-box" id="utm-direct" rows="3" readonly spellcheck="false"></textarea>
+    <div class="form-actions">
+      <button type="button" class="btn btn--ghost" data-copy-utm="utm-direct">Copiar URL completa</button>
+    </div>
+
+    <div class="modal__actions">
+      <button type="button" class="btn btn--ghost" data-close>Fechar</button>
+    </div>
   </div>
 </div>
 

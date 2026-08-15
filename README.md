@@ -1,4 +1,4 @@
-# FlowCheckout
+# GoCheckout
 
 Checkout PIX próprio com gateway [MisticPay](https://api.misticpay.com), painel
 administrativo e banco Supabase. Node.js + Express, HTML/CSS/JS puro no frontend

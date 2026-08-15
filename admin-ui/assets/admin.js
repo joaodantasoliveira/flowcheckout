@@ -228,29 +228,70 @@ async function loadOverview() {
 function renderFunnel(steps, gateways) {
   const topo = Math.max(1, steps[0].value);
 
-  const linhas = steps
+  /* ---- geometria do funil ----
+     Cada etapa é um trapézio cuja largura acompanha o valor. A largura
+     mínima de 14% existe para a etapa final não virar um fio quando a
+     conversão é baixa — o rótulo precisa caber. */
+  const W = 300;
+  const H = 62;
+  const GAP = 6;
+  const larguras = steps.map((s) => Math.max(14, (s.value / topo) * 100));
+
+  const trapezios = steps
     .map((s, i) => {
-      const pct = Math.round((s.value / topo) * 100);
-      const anterior = i > 0 ? steps[i - 1].value : null;
+      const topoL = (larguras[i] / 100) * W;
+      const baseL = ((larguras[i + 1] ?? larguras[i] * 0.82) / 100) * W;
+      const y = i * (H + GAP);
+
+      const x1 = (W - topoL) / 2;
+      const x2 = (W + topoL) / 2;
+      const x3 = (W + baseL) / 2;
+      const x4 = (W - baseL) / 2;
+
+      return `
+        <polygon points="${x1},${y} ${x2},${y} ${x3},${y + H} ${x4},${y + H}"
+                 fill="url(#funil${i})" class="funil__seg" style="--d:${i * 0.08}s" />
+        <text x="${W / 2}" y="${y + H / 2 - 3}" class="funil__num">${s.value}</text>
+        <text x="${W / 2}" y="${y + H / 2 + 14}" class="funil__cap">${esc(s.label)}</text>`;
+    })
+    .join('');
+
+  const gradientes = steps
+    .map((s, i) => {
+      // Do verde ao lima conforme desce: a etapa final é a que interessa.
+      const t = steps.length > 1 ? i / (steps.length - 1) : 0;
+      const de = `rgba(31,165,100,${0.9 - t * 0.25})`;
+      const para = `rgba(210,214,141,${0.55 + t * 0.4})`;
+      return `<linearGradient id="funil${i}" x1="0" y1="0" x2="1" y2="1">
+                <stop offset="0" stop-color="${de}"/><stop offset="1" stop-color="${para}"/>
+              </linearGradient>`;
+    })
+    .join('');
+
+  const alturaTotal = steps.length * (H + GAP);
+
+  const perdas = steps
+    .map((s, i) => {
+      if (i === 0) return '';
+      const anterior = steps[i - 1].value;
       const queda = anterior && anterior > s.value
         ? Math.round(((anterior - s.value) / anterior) * 100)
         : 0;
-
-      return `
-        <div class="funnel__row">
-          <div class="funnel__head">
-            <span class="funnel__label">${esc(s.label)}</span>
-            <span class="funnel__value">${s.value}</span>
-          </div>
-          <div class="funnel__track">
-            <div class="funnel__fill" style="width:${Math.max(3, pct)}%"></div>
-          </div>
-          <div class="funnel__meta">
-            ${pct}% do topo${queda ? ` · <span class="funnel__drop">−${queda}% nesta etapa</span>` : ''}
-          </div>
-        </div>`;
+      if (!queda) return '';
+      return `<div class="funil__perda">
+                <span>${esc(steps[i - 1].label)} → ${esc(s.label)}</span>
+                <span class="funil__drop">−${queda}%</span>
+              </div>`;
     })
     .join('');
+
+  const linhas = `
+    <svg class="funil" viewBox="0 0 ${W} ${alturaTotal}" role="img"
+         aria-label="Funil do checkout">
+      <defs>${gradientes}</defs>
+      ${trapezios}
+    </svg>
+    ${perdas ? `<div class="funil__perdas">${perdas}</div>` : ''}`;
 
   const porGateway = gateways.length
     ? `<div class="funnel__gw">
@@ -459,6 +500,7 @@ async function loadProducts() {
             <td><button class="btn btn--ghost btn--mini" data-copy="${esc(p.checkoutUrl)}">Copiar link</button></td>
             <td>
               <div class="actions">
+                <button class="btn btn--ghost btn--mini" data-utm="${esc(p.id)}">UTM do anúncio</button>
                 <button class="btn btn--ghost btn--mini" data-edit="${esc(p.id)}">Editar</button>
                 <button class="btn btn--danger btn--mini" data-del="${esc(p.id)}">Excluir</button>
               </div>
@@ -479,6 +521,9 @@ $('#products-table').addEventListener('click', async (event) => {
     return;
   }
 
+  const utm = event.target.closest('[data-utm]');
+  if (utm) return openUtmModal(state.products.find((p) => p.id === utm.dataset.utm));
+
   const edit = event.target.closest('[data-edit]');
   if (edit) return openProductModal(state.products.find((p) => p.id === edit.dataset.edit));
 
@@ -497,6 +542,46 @@ $('#products-table').addEventListener('click', async (event) => {
   }
 });
 
+
+/* ---------------- UTM por produto ---------------- */
+
+/** Parâmetros que o Meta substitui pelo nome real no clique. */
+const META_PARAMS =
+  'utm_source=facebook' +
+  '&utm_medium={{adset.name}}' +
+  '&utm_campaign={{campaign.name}}' +
+  '&utm_content={{ad.name}}' +
+  '&utm_term={{placement}}';
+
+function openUtmModal(product) {
+  if (!product) return;
+
+  const base = `${location.origin}/?produto=${encodeURIComponent(product.id)}`;
+
+  $('#utm-title').textContent = `Rastreamento · ${product.name}`;
+  $('#utm-params').value = META_PARAMS;
+  $('#utm-link').value = base;
+  $('#utm-direct').value = `${base}&${META_PARAMS}`;
+
+  $('#utm-modal').hidden = false;
+}
+
+$('#utm-modal').addEventListener('click', async (event) => {
+  const button = event.target.closest('[data-copy-utm]');
+  if (!button) return;
+
+  const campo = $(`#${button.dataset.copyUtm}`);
+  try {
+    await navigator.clipboard.writeText(campo.value);
+  } catch {
+    campo.select();
+    document.execCommand('copy');
+  }
+
+  const texto = button.textContent;
+  button.textContent = 'Copiado!';
+  setTimeout(() => (button.textContent = texto), 2000);
+});
 
 /** Preenche o seletor de pixel do produto. */
 async function populatePixelSelect(selectedId) {
