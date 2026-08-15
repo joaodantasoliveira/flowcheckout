@@ -8,7 +8,7 @@ import { defaultProductId, formatBRL, getActiveProduct } from '../products.js';
 import { rateLimit } from '../rate-limit.js';
 import { getActiveGateway } from '../settings.js';
 import { getPixel } from '../pixels.js';
-import { createOrder, getOrder, linkGatewayId, updateOrder } from '../store.js';
+import { createOrder, getOrder, linkGatewayId, recordPageView, updateOrder } from '../store.js';
 import { eventIdFor, extractTracking, trackEvent } from '../tracking.js';
 import { validateCheckoutPayload } from '../validators.js';
 
@@ -32,6 +32,10 @@ const createLimiter = rateLimit({
 });
 
 const statusLimiter = rateLimit({ scope: 'status', windowMs: 60_000, max: 90 });
+
+// Limite alto: uma pessoa pode abrir várias ofertas. Serve só para conter
+// bot que tentaria inflar o topo do funil.
+const viewLimiter = rateLimit({ scope: 'view', windowMs: 60_000, max: 30 });
 
 /** Dados do produto para montar o resumo do pedido na tela. */
 checkoutRouter.get('/product', async (req, res, next) => {
@@ -66,6 +70,28 @@ checkoutRouter.get('/product', async (req, res, next) => {
     });
   } catch (err) {
     next(err);
+  }
+});
+
+/**
+ * Registra a visita na página. Topo do funil.
+ * Responde 204 sempre: se o contador falhar, o comprador nem fica sabendo.
+ */
+checkoutRouter.post('/view', viewLimiter, async (req, res) => {
+  res.status(204).end();
+
+  try {
+    const productId = String(req.body?.productId || '').slice(0, 80);
+    const sessionId = String(req.body?.sessionId || '').slice(0, 60);
+    if (!productId || !sessionId) return;
+
+    await recordPageView({
+      productId,
+      sessionId,
+      tracking: extractTracking(req.body, req),
+    });
+  } catch {
+    // Silêncio proposital: já respondemos, e visita não vale um log de erro.
   }
 });
 

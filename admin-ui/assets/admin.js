@@ -228,20 +228,36 @@ async function loadOverview() {
 function renderFunnel(steps, gateways) {
   const topo = Math.max(1, steps[0].value);
 
-  /* ---- geometria do funil ----
-     Cada etapa é um trapézio cuja largura acompanha o valor. A largura
-     mínima de 14% existe para a etapa final não virar um fio quando a
-     conversão é baixa — o rótulo precisa caber. */
+  /* ---- geometria: triângulo invertido completo ----
+     A largura é fixa e afunila do topo até a ponta, independente dos
+     valores. Largura proporcional ao dado deixaria a última faixa
+     invisível quando a conversão é baixa — justamente o caso em que
+     você mais precisa olhar. O número dentro carrega o dado. */
   const W = 300;
-  const H = 62;
-  const GAP = 6;
-  const larguras = steps.map((s) => Math.max(14, (s.value / topo) * 100));
+  const H = 58;
+  const GAP = 4;
+  const TOPO = 100;
+  const PONTA = 16;
+
+  const larguraEm = (i) => TOPO - ((TOPO - PONTA) / steps.length) * i;
+
+  /* Do mais claro no topo ao mais escuro na base: a venda é o fundo do
+     funil, e o tom mais fechado dá peso a ela. */
+  const TONS = [
+    { fundo: '#E5E1EE', texto: '#2B303A' },
+    { fundo: '#D2D68D', texto: '#2B303A' },
+    { fundo: '#4FBF83', texto: '#12301F' },
+    { fundo: '#157145', texto: '#E5E1EE' },
+  ];
+
+  const tomDe = (i) => TONS[Math.min(i, TONS.length - 1)];
 
   const trapezios = steps
     .map((s, i) => {
-      const topoL = (larguras[i] / 100) * W;
-      const baseL = ((larguras[i + 1] ?? larguras[i] * 0.82) / 100) * W;
+      const topoL = (larguraEm(i) / 100) * W;
+      const baseL = (larguraEm(i + 1) / 100) * W;
       const y = i * (H + GAP);
+      const tom = tomDe(i);
 
       const x1 = (W - topoL) / 2;
       const x2 = (W + topoL) / 2;
@@ -250,24 +266,15 @@ function renderFunnel(steps, gateways) {
 
       return `
         <polygon points="${x1},${y} ${x2},${y} ${x3},${y + H} ${x4},${y + H}"
-                 fill="url(#funil${i})" class="funil__seg" style="--d:${i * 0.08}s" />
-        <text x="${W / 2}" y="${y + H / 2 - 3}" class="funil__num">${s.value}</text>
-        <text x="${W / 2}" y="${y + H / 2 + 14}" class="funil__cap">${esc(s.label)}</text>`;
+                 fill="${tom.fundo}" class="funil__seg" style="--d:${i * 0.08}s" />
+        <text x="${W / 2}" y="${y + H / 2 - 2}" class="funil__num"
+              fill="${tom.texto}">${s.value}</text>
+        <text x="${W / 2}" y="${y + H / 2 + 15}" class="funil__cap"
+              fill="${tom.texto}" opacity=".8">${esc(s.label)}</text>`;
     })
     .join('');
 
-  const gradientes = steps
-    .map((s, i) => {
-      // Do verde ao lima conforme desce: a etapa final é a que interessa.
-      const t = steps.length > 1 ? i / (steps.length - 1) : 0;
-      const de = `rgba(31,165,100,${0.9 - t * 0.25})`;
-      const para = `rgba(210,214,141,${0.55 + t * 0.4})`;
-      return `<linearGradient id="funil${i}" x1="0" y1="0" x2="1" y2="1">
-                <stop offset="0" stop-color="${de}"/><stop offset="1" stop-color="${para}"/>
-              </linearGradient>`;
-    })
-    .join('');
-
+  const gradientes = '';
   const alturaTotal = steps.length * (H + GAP);
 
   const perdas = steps

@@ -1,6 +1,6 @@
 import crypto from 'node:crypto';
 
-import { dbInsert, dbSelect, dbSelectOne, dbSelectWithCount, dbUpdate } from './supabase.js';
+import { dbInsert, dbSelect, dbSelectOne, dbSelectWithCount, dbUpdate, dbUpsert } from './supabase.js';
 
 /**
  * Pedidos, na tabela public.orders.
@@ -256,6 +256,52 @@ export async function listOrdersForStats({ limit = 20000 } = {}) {
     // Origem do tráfego. Sem dados pessoais: só o que veio da URL.
     tracking: row.tracking || {},
   }));
+}
+
+/* ============================================================
+   Visitas na página de checkout
+   ============================================================ */
+
+/**
+ * Registra uma visita. Uma por sessão e por produto — recarregar a página
+ * nao infla o topo do funil.
+ *
+ * Nunca lanca: contador de funil quebrado nao pode impedir alguem de comprar.
+ */
+export async function recordPageView({ productId, sessionId, tracking }) {
+  try {
+    await dbUpsert(
+      'page_views',
+      { product_id: productId, session_id: sessionId, tracking: tracking || null },
+      { onConflict: 'product_id,session_id' }
+    );
+    return true;
+  } catch (err) {
+    if (/page_views/.test(err?.message || '')) return false; // migração 008 pendente
+    console.error('[visitas] falha ao registrar:', err.message);
+    return false;
+  }
+}
+
+/** Visitas do período, com origem — alimenta o topo do funil. */
+export async function listPageViews({ since }) {
+  try {
+    const rows = await dbSelect('page_views', {
+      select: 'product_id,session_id,created_at,tracking',
+      filters: { created_at: `gte.${new Date(since).toISOString()}` },
+      limit: 50000,
+    });
+
+    return rows.map((row) => ({
+      productId: row.product_id,
+      sessionId: row.session_id,
+      createdAt: new Date(row.created_at).getTime(),
+      tracking: row.tracking || {},
+    }));
+  } catch (err) {
+    if (/page_views/.test(err?.message || '')) return null; // migração 008 pendente
+    throw err;
+  }
 }
 
 export async function listRecentOrders(limit = 8) {

@@ -283,7 +283,33 @@ async function loadProduct() {
 
   if (product.pixelId) initPixel(product.pixelId);
 
+  registrarVisita(product.id);
   renderMethods(product);
+}
+
+/**
+ * Conta a visita — topo do funil.
+ * Uma por aba: sessionStorage evita que recarregar a página vire 5 visitas
+ * e faça a conversão parecer pior do que é.
+ */
+function registrarVisita(productId) {
+  const chave = `_gc_visit_${productId}`;
+  if (sessionStorage.getItem(chave)) return;
+
+  let sessionId = localStorage.getItem('_gc_sid');
+  if (!sessionId) {
+    sessionId = `s.${Date.now().toString(36)}.${Math.random().toString(36).slice(2, 12)}`;
+    localStorage.setItem('_gc_sid', sessionId);
+  }
+
+  sessionStorage.setItem(chave, '1');
+
+  fetch('/api/checkout/view', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ productId, sessionId, tracking }),
+    keepalive: true,
+  }).catch(() => {});
 }
 
 /**

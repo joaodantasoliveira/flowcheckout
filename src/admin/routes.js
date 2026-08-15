@@ -42,6 +42,7 @@ import {
   listInfractionOrders,
   listOrders,
   listOrdersForStats,
+  listPageViews,
   listPaidOrders,
   listRecentOrders,
 } from '../store.js';
@@ -178,11 +179,12 @@ adminRouter.get(
   wrap(async (req, res) => {
     const days = Math.min(90, Math.max(7, Number(req.query.days) || 14));
 
-    const [paid, allOrders, recent, infractions] = await Promise.all([
+    const [paid, allOrders, recent, infractions, views] = await Promise.all([
       listPaidOrders(),
       listOrdersForStats(),
       listRecentOrders(8),
       listInfractionOrders(),
+      listPageViews({ since: Date.now() - days * 24 * 60 * 60 * 1000 }),
     ]);
 
     const sum = (list) => list.reduce((total, o) => total + o.amountCents, 0);
@@ -310,11 +312,15 @@ adminRouter.get(
         monthCents: sum(since(now - 30 * DAY)),
         monthCount: since(now - 30 * DAY).length,
       },
+      // views === null significa migracao 008 pendente: some a etapa em vez
+      // de mostrar zero, que pareceria queda de 100% no topo.
       funnel: [
-        { label: 'Checkouts iniciados', value: iniciados },
+        ...(views === null ? [] : [{ label: 'Visitas na página', value: views.length }]),
+        { label: 'Checkout iniciado', value: iniciados },
         { label: 'PIX gerado', value: comPix },
-        { label: 'Pagamento concluído', value: pagos },
+        { label: 'Venda', value: pagos },
       ],
+      viewsTracked: views !== null,
       hourly: porHora,
       gateways: [...porGateway.values()].sort((a, b) => b.cents - a.cents),
       daily,
