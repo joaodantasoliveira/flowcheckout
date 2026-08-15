@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 import express, { Router } from 'express';
 
 import { audit, listAudit } from '../audit.js';
+import { buildCampaignReport, META_URL_PARAMS } from '../campaigns.js';
 import { config } from '../config.js';
 import { hasEncryptionKey } from '../crypto-utils.js';
 import { testCredentials as testPixelCredentials } from '../meta-capi.js';
@@ -674,6 +675,22 @@ adminRouter.get(
     } catch {
       res.status(502).json({ error: 'Não foi possível consultar o saldo agora.' });
     }
+  })
+);
+
+/* ---------------- campanhas ---------------- */
+
+adminRouter.get(
+  '/api/campaigns',
+  wrap(async (req, res) => {
+    const days = Math.min(90, Math.max(7, Number(req.query.days) || 14));
+    const orders = await listOrdersForStats();
+
+    res.json({
+      ...buildCampaignReport(orders, { days }),
+      metaUrlParams: META_URL_PARAMS,
+      checkoutUrl: config.publicUrl,
+    });
   })
 );
 

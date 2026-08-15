@@ -7,7 +7,7 @@ const BASE = location.pathname.replace(/\/(painel)?\/?$/, '');
 const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
 
-const state = { csrf: null, view: 'overview', ordersPage: 1, products: [], days: 14 };
+const state = { csrf: null, view: 'overview', ordersPage: 1, products: [], days: 14, campDays: 14 };
 
 /* ---------------- utilidades ---------------- */
 
@@ -100,6 +100,7 @@ const VIEW_TITLES = {
   'overview': 'Visão geral',
   'products': 'Produtos',
   'orders': 'Vendas',
+  'campaigns': 'Campanhas',
   'settings': 'Configurações',
   'pixels': 'Rastreamento',
   'audit': 'Auditoria'
@@ -115,6 +116,7 @@ function showView(view) {
   if (view === 'overview') loadOverview();
   if (view === 'products') loadProducts();
   if (view === 'orders') loadOrders();
+  if (view === 'campaigns') loadCampaigns();
   if (view === 'settings') loadGateways();
   if (view === 'pixels') loadPixels();
   if (view === 'audit') loadAudit();
@@ -1012,6 +1014,143 @@ $('#gw-cards').addEventListener('submit', async (event) => {
     button.disabled = false;
     button.textContent = 'Salvar credenciais';
   }
+});
+
+/* ---------------- campanhas ---------------- */
+
+async function loadCampaigns() {
+  const data = await api(`/campaigns?days=${state.campDays}`);
+  const { resumo } = data;
+
+  $('#camp-params').value = `${data.checkoutUrl}/?produto=SEU_PRODUTO&${data.metaUrlParams}`;
+
+  /* Aviso quando a atribuição está furada — é o erro mais comum e o mais
+     caro: você otimiza campanha no escuro sem perceber. */
+  const aviso = $('#camp-warning');
+  if (resumo.total.iniciados === 0) {
+    aviso.hidden = true;
+  } else if (resumo.comOrigem.iniciados === 0) {
+    aviso.textContent =
+      'Nenhum pedido no período trouxe origem. Se você já está rodando anúncio, os ' +
+      'parâmetros de URL não estão configurados — veja o bloco no fim desta página.';
+    aviso.hidden = false;
+  } else if (resumo.comFbc === 0 && resumo.meta.iniciados > 0) {
+    aviso.textContent =
+      'Chegou tráfego do Meta, mas nenhum pedido trouxe o identificador do clique (_fbc). ' +
+      'O código da landing provavelmente não está instalado — sem ele a atribuição da venda ao ' +
+      'anúncio fica quebrada.';
+    aviso.hidden = false;
+  } else {
+    aviso.hidden = true;
+  }
+
+  const pct = (a, b) => (b ? Math.round((a / b) * 100) : 0);
+
+  $('#camp-stats').innerHTML = `
+    <div class="stat">
+      <p class="stat__label">Receita de anúncio</p>
+      <p class="stat__value stat__value--green">${esc(resumo.anuncio.receitaFormatada)}</p>
+      <p class="stat__hint">
+        ${resumo.anuncio.pagos} de ${resumo.anuncio.iniciados} checkouts · ${resumo.anuncio.conversao}% de conversão
+      </p>
+    </div>
+    <div class="stat">
+      <p class="stat__label">Tráfego Meta (com orgânico)</p>
+      <p class="stat__value">${esc(resumo.meta.receitaFormatada)}</p>
+      <p class="stat__hint">${pct(resumo.meta.receitaCents, resumo.total.receitaCents)}% da receita total</p>
+    </div>
+    <div class="stat">
+      <p class="stat__label">Com origem identificada</p>
+      <p class="stat__value">${pct(resumo.comOrigem.iniciados, resumo.total.iniciados)}%</p>
+      <p class="stat__hint">${resumo.comOrigem.iniciados} de ${resumo.total.iniciados} pedidos</p>
+    </div>
+    <div class="stat">
+      <p class="stat__label">Clique do anúncio (_fbc)</p>
+      <p class="stat__value" style="color:${resumo.comFbc ? 'inherit' : 'var(--warn)'}">${resumo.comFbc}</p>
+      <p class="stat__hint">pedidos rastreáveis até o anúncio</p>
+    </div>
+  `;
+
+  renderCampTable($('#camp-campaigns'), data.porCampanha, 'Campanha');
+  renderCampTable($('#camp-ads'), data.porAnuncio, 'Anúncio', { compacto: true });
+  renderCampTable($('#camp-adsets'), data.porConjunto, 'Conjunto', { compacto: true });
+  renderCampTable($('#camp-sources'), data.porOrigem, 'Origem');
+}
+
+/**
+ * Tabela de funil por origem.
+ * A coluna que importa é conversão: campanha com muita gente e conversão
+ * baixa é público errado, não criativo ruim.
+ */
+function renderCampTable(table, linhas, rotulo, { compacto = false } = {}) {
+  if (!linhas.length) {
+    table.innerHTML =
+      '<tbody><tr><td><div class="empty">Nenhum dado no período.</div></td></tr></tbody>';
+    return;
+  }
+
+  const melhorConversao = Math.max(...linhas.map((l) => l.conversao));
+
+  table.innerHTML = `
+    <thead>
+      <tr>
+        <th>${esc(rotulo)}</th>
+        <th>Checkouts</th>
+        <th>Vendas</th>
+        <th>Conversão</th>
+        <th>Receita</th>
+        ${compacto ? '' : '<th>Ticket</th><th>Perdido</th>'}
+      </tr>
+    </thead>
+    <tbody>
+      ${linhas
+        .map((l) => {
+          const destaque =
+            l.conversao === melhorConversao && l.pagos > 0 ? ' style="color:var(--neon-lime);font-weight:700"' : '';
+          return `<tr>
+            <td>${esc(l.nome)}</td>
+            <td class="num">${l.iniciados}</td>
+            <td class="num">${l.pagos}</td>
+            <td class="num"${destaque}>${l.conversao}%</td>
+            <td class="num">${esc(l.receitaFormatada)}</td>
+            ${
+              compacto
+                ? ''
+                : `<td class="num">${esc(l.ticketFormatado)}</td>
+                   <td class="num" style="color:var(--ink-dim)">${esc(l.perdidoFormatado)}</td>`
+            }
+          </tr>`;
+        })
+        .join('')}
+    </tbody>
+  `;
+}
+
+$('#camp-range').addEventListener('click', (event) => {
+  const button = event.target.closest('[data-days]');
+  if (!button) return;
+
+  state.campDays = Number(button.dataset.days);
+  $('#camp-range .range__btn').forEach((b) => b.classList.toggle('is-on', b === button));
+  loadCampaigns();
+});
+
+$('#copy-params').addEventListener('click', async () => {
+  const button = $('#copy-params');
+  const texto = $('#camp-params').value;
+
+  // O Meta pede só os parâmetros, sem a URL na frente.
+  const soParams = texto.includes('?') ? texto.split('?')[1] : texto;
+
+  try {
+    await navigator.clipboard.writeText(soParams);
+  } catch {
+    $('#camp-params').select();
+    document.execCommand('copy');
+  }
+
+  button.textContent = 'Copiado!';
+  setTimeout(() => (button.textContent = 'Copiar parâmetros'), 2200);
 });
 
 /* ---------------- pixels do Meta ---------------- */

@@ -236,7 +236,8 @@ export async function countOrdersByStatus(status) {
  */
 export async function listOrdersForStats({ limit = 20000 } = {}) {
   const rows = await dbSelect('orders', {
-    select: 'id,amount_cents,status,paid,paid_at,created_at,product_id,product_name,gateway,gateway_transaction_id',
+    select:
+      'id,amount_cents,status,paid,paid_at,created_at,product_id,product_name,gateway,gateway_transaction_id,tracking',
     order: 'created_at.desc',
     limit,
   });
@@ -252,6 +253,8 @@ export async function listOrdersForStats({ limit = 20000 } = {}) {
     productName: row.product_name,
     gateway: row.gateway || 'misticpay',
     gatewayTransactionId: row.gateway_transaction_id,
+    // Origem do tráfego. Sem dados pessoais: só o que veio da URL.
+    tracking: row.tracking || {},
   }));
 }
 

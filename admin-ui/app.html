@@ -37,6 +37,10 @@
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 6h14l-1.2 12.2a2 2 0 0 1-2 1.8H8.2a2 2 0 0 1-2-1.8z"/><path d="M9 6V4.8A2.8 2.8 0 0 1 15 4.8V6"/></svg>
       <span>Vendas</span>
     </button>
+    <button class="tab" data-view="campaigns">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 10.5v3a1 1 0 0 0 1 1h2.5l5 3.5V6l-5 3.5H5a1 1 0 0 0-1 1Z"/><path d="M16.5 9.5a4 4 0 0 1 0 5M19 7a7.5 7.5 0 0 1 0 10"/></svg>
+      <span>Campanhas</span>
+    </button>
     <button class="tab" data-view="settings">
       <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3.2"/><path d="M12 3v2.2M12 18.8V21M21 12h-2.2M5.2 12H3M18.4 5.6l-1.6 1.6M7.2 16.8l-1.6 1.6M18.4 18.4l-1.6-1.6M7.2 7.2 5.6 5.6"/></svg>
       <span>Configurações</span>
@@ -164,6 +168,76 @@
       </div>
 
       <div class="pager" id="orders-pager"></div>
+    </div>
+  </section>
+
+  <!-- ================= CAMPANHAS ================= -->
+  <section class="view" data-view="campaigns">
+    <div class="range" id="camp-range">
+      <button class="range__btn" data-days="7">7 dias</button>
+      <button class="range__btn is-on" data-days="14">14 dias</button>
+      <button class="range__btn" data-days="30">30 dias</button>
+    </div>
+
+    <p class="hint hint--warn" id="camp-warning" hidden></p>
+
+    <div class="stats" id="camp-stats"></div>
+
+    <div class="panel">
+      <div class="panel__head">
+        <h2 class="panel__title">Por campanha</h2>
+        <span class="panel__hint">o que o Gerenciador não mostra: conversão do checkout</span>
+      </div>
+      <div class="table-scroll">
+        <table class="table" id="camp-campaigns"></table>
+      </div>
+    </div>
+
+    <div class="split split--even">
+      <div class="panel">
+        <div class="panel__head">
+          <h2 class="panel__title">Por anúncio</h2>
+        </div>
+        <div class="table-scroll">
+          <table class="table" id="camp-ads"></table>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="panel__head">
+          <h2 class="panel__title">Por conjunto</h2>
+        </div>
+        <div class="table-scroll">
+          <table class="table" id="camp-adsets"></table>
+        </div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="panel__head">
+        <h2 class="panel__title">Por origem</h2>
+      </div>
+      <div class="table-scroll">
+        <table class="table" id="camp-sources"></table>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="panel__head">
+        <h2 class="panel__title">Parâmetros de URL do anúncio</h2>
+      </div>
+      <div class="form-panel form-panel--wide">
+        <p class="hint">
+          Cole no campo <strong>Parâmetros de URL</strong> do seu anúncio no Meta
+          (nível do anúncio, em Rastreamento). O Meta troca as chaves pelo nome real
+          no clique — <strong>sem isso as tabelas acima ficam vazias</strong>, por mais
+          certo que o pixel esteja.
+        </p>
+        <textarea class="inp inp--code-box" id="camp-params" rows="3" readonly spellcheck="false"></textarea>
+        <div class="form-actions">
+          <button type="button" class="btn" id="copy-params">Copiar parâmetros</button>
+        </div>
+      </div>
     </div>
   </section>
 
