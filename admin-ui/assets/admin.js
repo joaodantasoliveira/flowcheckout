@@ -7,7 +7,7 @@ const BASE = location.pathname.replace(/\/(painel)?\/?$/, '');
 const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
 
-const state = { csrf: null, view: 'overview', ordersPage: 1, products: [] };
+const state = { csrf: null, view: 'overview', ordersPage: 1, products: [], days: 14 };
 
 /* ---------------- utilidades ---------------- */
 
@@ -72,6 +72,22 @@ async function api(pathname, { method = 'GET', body } = {}) {
   return data;
 }
 
+
+/* ---------------- sidebar ---------------- */
+
+function openSide() {
+  $('#side').classList.add('is-open');
+  $('#side-scrim').hidden = false;
+}
+
+function closeSide() {
+  $('#side').classList.remove('is-open');
+  $('#side-scrim').hidden = true;
+}
+
+$('#side-toggle').addEventListener('click', openSide);
+$('#side-scrim').addEventListener('click', closeSide);
+
 /* ---------------- navegação ---------------- */
 
 $('#tabs').addEventListener('click', (event) => {
@@ -80,8 +96,18 @@ $('#tabs').addEventListener('click', (event) => {
   showView(tab.dataset.view);
 });
 
+const VIEW_TITLES = {
+  'overview': 'Visão geral',
+  'products': 'Produtos',
+  'orders': 'Vendas',
+  'settings': 'Configurações',
+  'audit': 'Auditoria'
+};
+
 function showView(view) {
   state.view = view;
+  $('#view-title').textContent = VIEW_TITLES[view] || 'Painel';
+  closeSide();
   $$('.tab').forEach((t) => t.classList.toggle('is-active', t.dataset.view === view));
   $$('.view').forEach((v) => v.classList.toggle('is-active', v.dataset.view === view));
 
@@ -102,20 +128,40 @@ $('#logout-btn').addEventListener('click', async () => {
 
 /* ---------------- visão geral ---------------- */
 
+/** Seta de variação: verde para cima, vermelho para baixo, cinza em zero. */
+function deltaTag(value, suffix = '') {
+  if (value === 0) return '<span class="delta delta--flat">estável</span>';
+  const up = value > 0;
+  return `<span class="delta delta--${up ? 'up' : 'down'}">
+            ${up ? '▲' : '▼'} ${Math.abs(value)}%${suffix}
+          </span>`;
+}
+
+function humanMinutes(min) {
+  if (min === null || min === undefined) return '—';
+  if (min < 1) return 'menos de 1 min';
+  if (min < 60) return `${min} min`;
+  const h = Math.floor(min / 60);
+  const m = min % 60;
+  return m ? `${h}h ${m}min` : `${h}h`;
+}
+
 async function loadOverview() {
-  const data = await api('/overview');
-  const { totals, periods, daily, topProducts, recent } = data;
+  const data = await api(`/overview?days=${state.days}`);
+  const { totals, window: win, daily, topProducts, recent, funnel, hourly, gateways } = data;
+
+  $('#chart-total').textContent = `${win.formatted} · ${win.count} ${win.count === 1 ? 'venda' : 'vendas'}`;
 
   $('#stats').innerHTML = `
     <div class="stat">
-      <p class="stat__label">Receita total</p>
-      <p class="stat__value stat__value--green">${esc(totals.revenueFormatted)}</p>
-      <p class="stat__hint">${totals.salesCount} ${totals.salesCount === 1 ? 'venda' : 'vendas'}</p>
+      <p class="stat__label">Receita no período</p>
+      <p class="stat__value stat__value--green">${esc(win.formatted)}</p>
+      <p class="stat__hint">${deltaTag(win.deltaCents)} vs. período anterior</p>
     </div>
     <div class="stat">
-      <p class="stat__label">Últimos 30 dias</p>
-      <p class="stat__value">${esc(brl(periods.monthCents))}</p>
-      <p class="stat__hint">${periods.monthCount} vendas · hoje ${esc(brl(periods.dayCents))}</p>
+      <p class="stat__label">Vendas</p>
+      <p class="stat__value">${win.count}</p>
+      <p class="stat__hint">${deltaTag(win.deltaCount)} · ${totals.salesCount} no total</p>
     </div>
     <div class="stat">
       <p class="stat__label">Ticket médio</p>
@@ -125,7 +171,17 @@ async function loadOverview() {
     <div class="stat">
       <p class="stat__label">Conversão</p>
       <p class="stat__value">${totals.conversionRate}%</p>
-      <p class="stat__hint">${totals.pendingCount} pendentes de ${totals.ordersCount}</p>
+      <p class="stat__hint">de ${totals.ordersCount} checkouts iniciados</p>
+    </div>
+    <div class="stat">
+      <p class="stat__label">Tempo até pagar</p>
+      <p class="stat__value">${esc(humanMinutes(totals.medianMinutesToPay))}</p>
+      <p class="stat__hint">mediana entre gerar o PIX e pagar</p>
+    </div>
+    <div class="stat">
+      <p class="stat__label">Aguardando pagamento</p>
+      <p class="stat__value" style="color:var(--warn)">${esc(totals.pendingFormatted)}</p>
+      <p class="stat__hint">${totals.pendingCount} PIX em aberto</p>
     </div>
     ${
       totals.infractionCount
@@ -139,6 +195,8 @@ async function loadOverview() {
   `;
 
   renderWaveChart(daily);
+  renderFunnel(funnel, gateways);
+  renderHours(hourly);
 
   $('#top-products').innerHTML = topProducts.length
     ? topProducts
@@ -158,6 +216,96 @@ async function loadOverview() {
 
   renderOrderTable($('#recent-table'), recent, { compact: true });
 }
+
+/**
+ * Funil de checkout. Mostra onde o comprador desiste — a maior perda
+ * costuma ser entre gerar o PIX e efetivamente pagar.
+ */
+function renderFunnel(steps, gateways) {
+  const topo = Math.max(1, steps[0].value);
+
+  const linhas = steps
+    .map((s, i) => {
+      const pct = Math.round((s.value / topo) * 100);
+      const anterior = i > 0 ? steps[i - 1].value : null;
+      const queda = anterior && anterior > s.value
+        ? Math.round(((anterior - s.value) / anterior) * 100)
+        : 0;
+
+      return `
+        <div class="funnel__row">
+          <div class="funnel__head">
+            <span class="funnel__label">${esc(s.label)}</span>
+            <span class="funnel__value">${s.value}</span>
+          </div>
+          <div class="funnel__track">
+            <div class="funnel__fill" style="width:${Math.max(3, pct)}%"></div>
+          </div>
+          <div class="funnel__meta">
+            ${pct}% do topo${queda ? ` · <span class="funnel__drop">−${queda}% nesta etapa</span>` : ''}
+          </div>
+        </div>`;
+    })
+    .join('');
+
+  const porGateway = gateways.length
+    ? `<div class="funnel__gw">
+         ${gateways
+           .map((g) => {
+             const taxa = g.total ? Math.round((g.pagos / g.total) * 100) : 0;
+             return `<div class="funnel__gw-row">
+                       <span>${esc(g.gateway)}</span>
+                       <span class="funnel__gw-num">${g.pagos}/${g.total} · ${taxa}%</span>
+                     </div>`;
+           })
+           .join('')}
+       </div>`
+    : '';
+
+  $('#funnel').innerHTML = linhas + porGateway;
+}
+
+/** Vendas por hora do dia — mostra quando vale concentrar anúncio. */
+function renderHours(hourly) {
+  const peak = Math.max(1, ...hourly.map((h) => h.cents));
+  const total = hourly.reduce((t, h) => t + h.count, 0);
+
+  if (!total) {
+    $('#hours').innerHTML = '<div class="empty">Sem vendas no período.</div>';
+    return;
+  }
+
+  $('#hours').innerHTML = `
+    <div class="hours__grid">
+      ${hourly
+        .map((h) => {
+          const intensidade = h.cents / peak;
+          const label = String(h.hour).padStart(2, '0');
+          return `<div class="hours__cell" style="--i:${intensidade.toFixed(3)}"
+                       title="${label}h — ${esc(brl(h.cents))} (${h.count})">
+                    <span>${label}</span>
+                  </div>`;
+        })
+        .join('')}
+    </div>
+    <p class="hours__legend">
+      <span>00h</span>
+      <span class="hours__scale"></span>
+      <span>23h</span>
+    </p>`;
+}
+
+/* ---------------- seletor de período ---------------- */
+
+$('#range').addEventListener('click', (event) => {
+  const button = event.target.closest('[data-days]');
+  if (!button) return;
+
+  state.days = Number(button.dataset.days);
+  $$('#range .range__btn').forEach((b) => b.classList.toggle('is-on', b === button));
+  loadOverview();
+});
+
 
 /* ---------------- gráfico de onda ---------------- */
 

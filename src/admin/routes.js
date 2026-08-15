@@ -29,6 +29,7 @@ import {
   getOrder,
   listInfractionOrders,
   listOrders,
+  listOrdersForStats,
   listPaidOrders,
   listRecentOrders,
 } from '../store.js';
@@ -163,34 +164,44 @@ adminRouter.post(
 adminRouter.get(
   '/api/overview',
   wrap(async (req, res) => {
-    const [paid, ordersCount, pendingCount, recent, infractions] = await Promise.all([
+    const days = Math.min(90, Math.max(7, Number(req.query.days) || 14));
+
+    const [paid, allOrders, recent, infractions] = await Promise.all([
       listPaidOrders(),
-      countOrders(),
-      countOrdersByStatus('PENDENTE'),
+      listOrdersForStats(),
       listRecentOrders(8),
       listInfractionOrders(),
     ]);
 
     const sum = (list) => list.reduce((total, o) => total + o.amountCents, 0);
-    const since = (ts) => paid.filter((o) => (o.paidAt || o.createdAt) >= ts);
+    const when = (o) => o.paidAt || o.createdAt;
 
     const now = Date.now();
-    const dayAgo = now - 24 * 60 * 60 * 1000;
-    const weekAgo = now - 7 * 24 * 60 * 60 * 1000;
-    const monthAgo = now - 30 * 24 * 60 * 60 * 1000;
+    const DAY = 24 * 60 * 60 * 1000;
+    const since = (ts) => paid.filter((o) => when(o) >= ts);
 
-    // Receita por dia nos ultimos 14 dias, para o grafico de barras.
+    /* ---------- janela atual e a anterior, para comparar ---------- */
+    const windowStart = now - days * DAY;
+    const prevStart = now - days * 2 * DAY;
+
+    const inWindow = paid.filter((o) => when(o) >= windowStart);
+    const inPrev = paid.filter((o) => when(o) >= prevStart && when(o) < windowStart);
+
+    /** Variação percentual protegida contra divisão por zero. */
+    const delta = (atual, anterior) => {
+      if (!anterior) return atual ? 100 : 0;
+      return Number((((atual - anterior) / anterior) * 100).toFixed(1));
+    };
+
+    /* ---------- série diária ---------- */
     const daily = [];
-    for (let i = 13; i >= 0; i--) {
+    for (let i = days - 1; i >= 0; i--) {
       const start = new Date();
       start.setHours(0, 0, 0, 0);
       start.setDate(start.getDate() - i);
       const end = new Date(start).setDate(start.getDate() + 1);
 
-      const dayOrders = paid.filter((o) => {
-        const at = o.paidAt || o.createdAt;
-        return at >= start.getTime() && at < end;
-      });
+      const dayOrders = paid.filter((o) => when(o) >= start.getTime() && when(o) < end);
 
       daily.push({
         date: start.toISOString().slice(0, 10),
@@ -199,7 +210,48 @@ adminRouter.get(
       });
     }
 
-    // Ranking de produtos por receita.
+    /* ---------- funil: quem chegou até onde ---------- */
+    const iniciados = allOrders.length;
+    const comPix = allOrders.filter((o) => o.gatewayTransactionId).length;
+    const pagos = allOrders.filter((o) => o.paid).length;
+
+    /* ---------- tempo até pagar ----------
+       Mediana, não média: um pedido pago 3 dias depois distorceria a média
+       e esconderia o comportamento típico. */
+    const temposMin = allOrders
+      .filter((o) => o.paid && o.paidAt && o.paidAt > o.createdAt)
+      .map((o) => (o.paidAt - o.createdAt) / 60000)
+      .sort((a, b) => a - b);
+
+    const medianaMin = temposMin.length
+      ? Math.round(temposMin[Math.floor(temposMin.length / 2)])
+      : null;
+
+    /* ---------- dinheiro parado ---------- */
+    const pendentes = allOrders.filter((o) => o.status === 'PENDENTE');
+
+    /* ---------- por hora do dia ---------- */
+    const porHora = Array.from({ length: 24 }, (_, h) => ({ hour: h, cents: 0, count: 0 }));
+    for (const order of inWindow) {
+      const h = new Date(when(order)).getHours();
+      porHora[h].cents += order.amountCents;
+      porHora[h].count += 1;
+    }
+
+    /* ---------- por gateway ---------- */
+    const porGateway = new Map();
+    for (const order of allOrders) {
+      const key = order.gateway || 'misticpay';
+      const entry = porGateway.get(key) || { gateway: key, total: 0, pagos: 0, cents: 0 };
+      entry.total += 1;
+      if (order.paid) {
+        entry.pagos += 1;
+        entry.cents += order.amountCents;
+      }
+      porGateway.set(key, entry);
+    }
+
+    /* ---------- ranking de produtos ---------- */
     const byProduct = new Map();
     for (const order of paid) {
       const entry = byProduct.get(order.productId) || {
@@ -216,371 +268,47 @@ adminRouter.get(
     const averageTicket = paid.length ? Math.round(sum(paid) / paid.length) : 0;
 
     res.json({
+      days,
       totals: {
         revenueCents: sum(paid),
         revenueFormatted: formatBRL(sum(paid)),
         salesCount: paid.length,
-        ordersCount,
-        // Percentual de checkouts iniciados que viraram pagamento.
-        conversionRate: ordersCount ? Number(((paid.length / ordersCount) * 100).toFixed(1)) : 0,
+        ordersCount: iniciados,
+        conversionRate: iniciados ? Number(((pagos / iniciados) * 100).toFixed(1)) : 0,
         averageTicketCents: averageTicket,
         averageTicketFormatted: formatBRL(averageTicket),
-        pendingCount,
+        pendingCount: pendentes.length,
+        pendingCents: sum(pendentes),
+        pendingFormatted: formatBRL(sum(pendentes)),
         infractionCount: infractions.length,
+        medianMinutesToPay: medianaMin,
+      },
+      window: {
+        cents: sum(inWindow),
+        formatted: formatBRL(sum(inWindow)),
+        count: inWindow.length,
+        deltaCents: delta(sum(inWindow), sum(inPrev)),
+        deltaCount: delta(inWindow.length, inPrev.length),
       },
       periods: {
-        dayCents: sum(since(dayAgo)),
-        dayCount: since(dayAgo).length,
-        weekCents: sum(since(weekAgo)),
-        weekCount: since(weekAgo).length,
-        monthCents: sum(since(monthAgo)),
-        monthCount: since(monthAgo).length,
+        dayCents: sum(since(now - DAY)),
+        dayCount: since(now - DAY).length,
+        weekCents: sum(since(now - 7 * DAY)),
+        weekCount: since(now - 7 * DAY).length,
+        monthCents: sum(since(now - 30 * DAY)),
+        monthCount: since(now - 30 * DAY).length,
       },
+      funnel: [
+        { label: 'Checkouts iniciados', value: iniciados },
+        { label: 'PIX gerado', value: comPix },
+        { label: 'Pagamento concluído', value: pagos },
+      ],
+      hourly: porHora,
+      gateways: [...porGateway.values()].sort((a, b) => b.cents - a.cents),
       daily,
       topProducts: [...byProduct.values()].sort((a, b) => b.cents - a.cents).slice(0, 5),
       recent: recent.map((o) => orderView(o)),
     });
-  })
-);
-
-/* ---------------- produtos ---------------- */
-
-adminRouter.get(
-  '/api/products',
-  wrap(async (req, res) => {
-    const [products, paid] = await Promise.all([listProducts(), listPaidOrders()]);
-
-    res.json(
-      products.map((product) => {
-        const sales = paid.filter((o) => o.productId === product.id);
-        return {
-          ...product,
-          priceFormatted: formatBRL(product.priceCents),
-          salesCount: sales.length,
-          revenueCents: sales.reduce((total, o) => total + o.amountCents, 0),
-          checkoutUrl: `/?produto=${encodeURIComponent(product.id)}`,
-        };
-      })
-    );
-  })
-);
-
-adminRouter.post(
-  '/api/products',
-  wrap(async (req, res) => {
-    const errors = validateProductInput(req.body);
-    if (Object.keys(errors).length) {
-      return res.status(422).json({ error: 'Revise os campos.', fields: errors });
-    }
-
-    const product = await createProduct(req.body);
-    await audit('produto.criado', {
-      adminId: req.admin.id,
-      ip: req.ip,
-      detail: { id: product.id, priceCents: product.priceCents },
-    });
-
-    res.status(201).json(product);
-  })
-);
-
-adminRouter.patch(
-  '/api/products/:id',
-  wrap(async (req, res) => {
-    const product = await getProduct(req.params.id);
-    if (!product) return res.status(404).json({ error: 'Produto não encontrado.' });
-
-    const errors = validateProductInput(req.body, { partial: true });
-    if (Object.keys(errors).length) {
-      return res.status(422).json({ error: 'Revise os campos.', fields: errors });
-    }
-
-    const updated = await updateProduct(product.id, req.body);
-    await audit('produto.editado', {
-      adminId: req.admin.id,
-      ip: req.ip,
-      detail: { id: product.id, previousPrice: product.priceCents, priceCents: updated.priceCents },
-    });
-
-    res.json(updated);
-  })
-);
-
-adminRouter.delete(
-  '/api/products/:id',
-  wrap(async (req, res) => {
-    const product = await getProduct(req.params.id);
-    if (!product) return res.status(404).json({ error: 'Produto não encontrado.' });
-
-    const result = await deleteProduct(product.id);
-    await audit(result.deleted ? 'produto.excluido' : 'produto.desativado', {
-      adminId: req.admin.id,
-      ip: req.ip,
-      detail: { id: product.id },
-    });
-
-    res.json({
-      ...result,
-      message: result.deleted
-        ? 'Produto excluído.'
-        : 'Produto tem vendas registradas e foi desativado em vez de excluído, para preservar o histórico.',
-    });
-  })
-);
-
-/* ---------------- vendas ---------------- */
-
-adminRouter.get(
-  '/api/orders',
-  wrap(async (req, res) => {
-    const { orders, pagination } = await listOrders({
-      status: String(req.query.status || '').toUpperCase(),
-      query: String(req.query.q || '').trim(),
-      page: Math.max(1, Number(req.query.page) || 1),
-    });
-
-    res.json({ data: orders.map((o) => orderView(o)), pagination });
-  })
-);
-
-adminRouter.get(
-  '/api/orders/:id',
-  wrap(async (req, res) => {
-    const order = await getOrder(req.params.id);
-    if (!order) return res.status(404).json({ error: 'Pedido não encontrado.' });
-    res.json(orderView(order));
-  })
-);
-
-/** Exibe os dados pessoais sem mascara. Toda exibicao fica registrada. */
-adminRouter.post(
-  '/api/orders/:id/reveal',
-  wrap(async (req, res) => {
-    const order = await getOrder(req.params.id);
-    if (!order) return res.status(404).json({ error: 'Pedido não encontrado.' });
-
-    await audit('dados_pessoais.exibidos', {
-      adminId: req.admin.id,
-      ip: req.ip,
-      detail: { orderId: order.id },
-    });
-
-    res.json(orderView(order, { unmasked: true }));
-  })
-);
-
-/** Forca uma reconsulta ao gateway — util quando o webhook nao chegou. */
-adminRouter.post(
-  '/api/orders/:id/recheck',
-  wrap(async (req, res) => {
-    const order = await getOrder(req.params.id);
-    if (!order) return res.status(404).json({ error: 'Pedido não encontrado.' });
-
-    const synced = await syncOrderWithGateway(order, { force: true });
-    await audit('pedido.reconsultado', {
-      adminId: req.admin.id,
-      ip: req.ip,
-      detail: { orderId: order.id },
-    });
-
-    res.json(orderView(synced));
-  })
-);
-
-/** Exportacao CSV — leva dados pessoais completos, por isso e auditada. */
-adminRouter.get(
-  '/api/orders/export/csv',
-  wrap(async (req, res) => {
-    const orders = await listPaidOrders();
-
-    await audit('vendas.exportadas', {
-      adminId: req.admin.id,
-      ip: req.ip,
-      detail: { count: orders.length },
-    });
-
-    const escape = (value) => {
-      const text = String(value ?? '');
-      // Neutraliza formula injection: =, +, -, @ no inicio viram texto no Excel.
-      const safe = /^[=+\-@\t\r]/.test(text) ? `'${text}` : text;
-      return `"${safe.replace(/"/g, '""')}"`;
-    };
-
-    const header = [
-      'pedido', 'data', 'produto', 'valor', 'status',
-      'nome', 'email', 'documento', 'telefone', 'e2e', 'transacao_gateway',
-    ];
-
-    const rows = orders.map((o) =>
-      [
-        o.id,
-        new Date(o.paidAt || o.createdAt).toISOString(),
-        o.productName,
-        (o.amountCents / 100).toFixed(2).replace('.', ','),
-        o.status,
-        o.customer.name,
-        o.customer.email,
-        o.customer.document,
-        o.customer.phone,
-        o.endToEndId || '',
-        o.gatewayTransactionId || '',
-      ].map(escape).join(';')
-    );
-
-    // BOM para o Excel abrir os acentos corretamente.
-    const csv = `﻿${header.map(escape).join(';')}\n${rows.join('\n')}`;
-
-    res.set({
-      'Content-Type': 'text/csv; charset=utf-8',
-      'Content-Disposition': `attachment; filename="vendas-${new Date().toISOString().slice(0, 10)}.csv"`,
-    });
-    res.send(csv);
-  })
-);
-
-/* ---------------- gateways de pagamento ---------------- */
-
-adminRouter.get(
-  '/api/gateways',
-  wrap(async (req, res) => res.json(await getGatewaysStatus()))
-);
-
-/** Troca o gateway ativo. Só permite se ele responder com as credenciais salvas. */
-adminRouter.put(
-  '/api/gateways/active',
-  wrap(async (req, res) => {
-    const gatewayId = String(req.body?.gateway || '').trim();
-    const gateway = getGateway(gatewayId);
-    if (!gateway) return res.status(422).json({ error: 'Gateway desconhecido.' });
-
-    const resolved = await getCredentials(gatewayId);
-    if (!resolved) {
-      return res.status(422).json({
-        error: `Cadastre as credenciais da ${gateway.label} antes de ativá-la.`,
-      });
-    }
-
-    // Ativar um gateway que não responde derrubaria todas as vendas de uma vez.
-    try {
-      await gateway.testCredentials(resolved.credentials);
-    } catch (err) {
-      return res.status(400).json({
-        error: `A ${gateway.label} recusou as credenciais salvas: ${err.message}. Gateway não trocado.`,
-      });
-    }
-
-    await setActiveGateway(gatewayId, req.admin.id);
-    await audit('gateway.ativo_alterado', {
-      adminId: req.admin.id,
-      ip: req.ip,
-      detail: { gateway: gatewayId },
-    });
-
-    res.json({ ok: true, ...(await getGatewaysStatus()) });
-  })
-);
-
-/**
- * Campo secreto em branco significa "mantenha o atual" — assim dá para
- * corrigir só o Client ID sem redigitar o segredo.
- */
-async function resolveFields(gateway, body) {
-  const current = (await getCredentials(gateway.id))?.credentials || {};
-  const values = {};
-  let reusedSecret = false;
-
-  for (const field of gateway.credentialFields) {
-    const typed = String(body?.[field.key] ?? '').trim();
-
-    if (typed) {
-      values[field.key] = typed;
-    } else if (field.secret && current[field.key]) {
-      values[field.key] = current[field.key];
-      reusedSecret = true;
-    } else {
-      values[field.key] = '';
-    }
-  }
-
-  const missing = gateway.credentialFields.filter((f) => !values[f.key]).map((f) => f.label);
-
-  return { values, missing, reusedSecret };
-}
-
-/** Testa credenciais sem gravar: chave errada não chega ao banco. */
-adminRouter.post(
-  '/api/gateways/:id/test',
-  wrap(async (req, res) => {
-    const gateway = getGateway(req.params.id);
-    if (!gateway) return res.status(404).json({ error: 'Gateway desconhecido.' });
-
-    const { values, missing } = await resolveFields(gateway, req.body);
-    if (missing.length) {
-      return res.status(422).json({ error: `Informe: ${missing.join(', ')}.` });
-    }
-
-    try {
-      const account = await gateway.testCredentials(values);
-      await audit('gateway.credenciais_testadas', {
-        adminId: req.admin.id,
-        ip: req.ip,
-        detail: { gateway: gateway.id, ok: true },
-      });
-      res.json({ ok: true, account });
-    } catch (err) {
-      await audit('gateway.credenciais_testadas', {
-        adminId: req.admin.id,
-        ip: req.ip,
-        detail: { gateway: gateway.id, ok: false },
-      });
-      res.status(400).json({
-        error:
-          err.status === 401
-            ? `A ${gateway.label} recusou essas credenciais.`
-            : `Não foi possível validar: ${err.message}`,
-      });
-    }
-  })
-);
-
-adminRouter.put(
-  '/api/gateways/:id/credentials',
-  wrap(async (req, res) => {
-    const gateway = getGateway(req.params.id);
-    if (!gateway) return res.status(404).json({ error: 'Gateway desconhecido.' });
-
-    const { values, missing, reusedSecret } = await resolveFields(gateway, req.body);
-    if (missing.length) {
-      return res.status(422).json({ error: `Informe: ${missing.join(', ')}.` });
-    }
-
-    // Só grava o que o gateway aceitou. Salvar chave inválida deixaria a loja
-    // sem conseguir gerar PIX até alguém perceber.
-    try {
-      await gateway.testCredentials(values);
-    } catch (err) {
-      return res.status(400).json({
-        error:
-          err.status === 401
-            ? `A ${gateway.label} recusou essas credenciais. Nada foi salvo.`
-            : `Não foi possível validar: ${err.message}. Nada foi salvo.`,
-      });
-    }
-
-    try {
-      await saveCredentials(gateway.id, values, req.admin.id);
-    } catch (err) {
-      return res.status(500).json({ error: err.message });
-    }
-
-    await audit('gateway.credenciais_alteradas', {
-      adminId: req.admin.id,
-      ip: req.ip,
-      // Nunca registramos a credencial em si — só que ela mudou e por quem.
-      detail: { gateway: gateway.id, secretTrocado: !reusedSecret },
-    });
-
-    res.json({ ok: true, ...(await getGatewaysStatus()) });
   })
 );
 

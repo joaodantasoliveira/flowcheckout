@@ -201,6 +201,32 @@ export async function countOrdersByStatus(status) {
   return total;
 }
 
+/**
+ * Pedidos com os campos que os indicadores usam.
+ * Traz colunas enxutas: puxar dados pessoais para calcular estatistica seria
+ * expor PII sem necessidade.
+ */
+export async function listOrdersForStats({ limit = 20000 } = {}) {
+  const rows = await dbSelect('orders', {
+    select: 'id,amount_cents,status,paid,paid_at,created_at,product_id,product_name,gateway,gateway_transaction_id',
+    order: 'created_at.desc',
+    limit,
+  });
+
+  return rows.map((row) => ({
+    id: row.id,
+    amountCents: Number(row.amount_cents),
+    status: row.status,
+    paid: row.paid,
+    paidAt: row.paid_at ? new Date(row.paid_at).getTime() : null,
+    createdAt: new Date(row.created_at).getTime(),
+    productId: row.product_id,
+    productName: row.product_name,
+    gateway: row.gateway || 'misticpay',
+    gatewayTransactionId: row.gateway_transaction_id,
+  }));
+}
+
 export async function listRecentOrders(limit = 8) {
   const rows = await dbSelect('orders', { order: 'created_at.desc', limit });
   return rows.map(fromRow);

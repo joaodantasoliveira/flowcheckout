@@ -14,21 +14,55 @@
 </head>
 <body>
 
+<div class="shell">
+
+<aside class="side" id="side">
+  <div class="side__brand">
+    <span class="side__logo" aria-hidden="true">
+      <svg viewBox="0 0 24 24"><path d="m12 3.6 8.4 8.4-8.4 8.4L3.6 12z"/><path d="M8.2 8.2 12 12l3.8-3.8M8.2 15.8 12 12l3.8 3.8"/></svg>
+    </span>
+    <span class="side__name">Painel</span>
+  </div>
+
+  <nav class="side__nav" id="tabs" aria-label="Seções">
+    <button class="tab is-active" data-view="overview">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 14h4v6H4zM10 8h4v12h-4zM16 11h4v9h-4z"/></svg>
+      <span>Visão geral</span>
+    </button>
+    <button class="tab" data-view="products">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8.5 12 4l8 4.5v7L12 20l-8-4.5z"/><path d="M4 8.5 12 13l8-4.5M12 13v7"/></svg>
+      <span>Produtos</span>
+    </button>
+    <button class="tab" data-view="orders">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 6h14l-1.2 12.2a2 2 0 0 1-2 1.8H8.2a2 2 0 0 1-2-1.8z"/><path d="M9 6V4.8A2.8 2.8 0 0 1 15 4.8V6"/></svg>
+      <span>Vendas</span>
+    </button>
+    <button class="tab" data-view="settings">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3.2"/><path d="M12 3v2.2M12 18.8V21M21 12h-2.2M5.2 12H3M18.4 5.6l-1.6 1.6M7.2 16.8l-1.6 1.6M18.4 18.4l-1.6-1.6M7.2 7.2 5.6 5.6"/></svg>
+      <span>Configurações</span>
+    </button>
+    <button class="tab" data-view="audit">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3.5h9L19 8v12.5H6z"/><path d="M14 3.5V8h5M9 12.5h6M9 16h4"/></svg>
+      <span>Auditoria</span>
+    </button>
+  </nav>
+
+  <div class="side__foot">
+    <p class="side__who" id="who"></p>
+    <button class="btn btn--ghost btn--mini" id="logout-btn">Sair</button>
+  </div>
+</aside>
+
+<div class="main">
+
 <header class="topbar">
   <div class="topbar__inner">
-    <span class="topbar__brand">Painel</span>
-
-    <nav class="tabs" id="tabs">
-      <button class="tab is-active" data-view="overview">Visão geral</button>
-      <button class="tab" data-view="products">Produtos</button>
-      <button class="tab" data-view="orders">Vendas</button>
-      <button class="tab" data-view="settings">Configurações</button>
-      <button class="tab" data-view="audit">Auditoria</button>
-    </nav>
-
+    <button class="side__toggle" id="side-toggle" aria-label="Abrir menu">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+    </button>
+    <h1 class="topbar__title" id="view-title">Visão geral</h1>
     <div class="topbar__right">
-      <span class="who" id="who"></span>
-      <button class="btn btn--ghost" id="logout-btn">Sair</button>
+      <span class="live" id="live-dot" title="Dados atualizados"><i></i> ao vivo</span>
     </div>
   </div>
 </header>
@@ -37,21 +71,45 @@
 
   <!-- ================= VISÃO GERAL ================= -->
   <section class="view is-active" data-view="overview">
+    <div class="range" id="range">
+      <button class="range__btn" data-days="7">7 dias</button>
+      <button class="range__btn is-on" data-days="14">14 dias</button>
+      <button class="range__btn" data-days="30">30 dias</button>
+    </div>
+
     <div class="stats" id="stats"></div>
 
     <div class="split">
       <div class="panel">
         <div class="panel__head">
-          <h2 class="panel__title">Receita dos últimos 14 dias</h2>
+          <h2 class="panel__title">Receita no período</h2>
+          <span class="panel__hint" id="chart-total"></span>
         </div>
         <div class="chart" id="chart"></div>
       </div>
 
       <div class="panel">
         <div class="panel__head">
+          <h2 class="panel__title">Funil do checkout</h2>
+        </div>
+        <div class="funnel" id="funnel"></div>
+      </div>
+    </div>
+
+    <div class="split split--even">
+      <div class="panel">
+        <div class="panel__head">
           <h2 class="panel__title">Produtos mais vendidos</h2>
         </div>
         <div id="top-products" class="ranked"></div>
+      </div>
+
+      <div class="panel">
+        <div class="panel__head">
+          <h2 class="panel__title">Horários que mais vendem</h2>
+          <span class="panel__hint">quando o dinheiro entra</span>
+        </div>
+        <div class="hours" id="hours"></div>
       </div>
     </div>
 
@@ -150,6 +208,11 @@
   </section>
 
 </main>
+
+</div><!-- /.main -->
+</div><!-- /.shell -->
+
+<div class="side__scrim" id="side-scrim" hidden></div>
 
 <!-- ================= MODAL DE PRODUTO ================= -->
 <div class="modal" id="product-modal" hidden>
