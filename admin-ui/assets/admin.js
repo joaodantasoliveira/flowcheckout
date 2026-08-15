@@ -542,6 +542,7 @@ function openProductModal(product = null) {
   $('#p-method-card').checked = methods.card === true;
   $('#p-headline').value = checkout.headline || '';
   $('#p-seal').checked = checkout.showSecuritySeal !== false;
+  $('#p-ask-zip').checked = checkout.askZip === true;
   $('#card-warning').hidden = !$('#p-method-card').checked;
 
   const success = product?.success || {};
@@ -605,6 +606,7 @@ $('#product-form').addEventListener('submit', async (event) => {
       },
       headline: $('#p-headline').value,
       showSecuritySeal: $('#p-seal').checked,
+      askZip: $('#p-ask-zip').checked,
     },
     success: {
       title: $('#p-success-title').value,

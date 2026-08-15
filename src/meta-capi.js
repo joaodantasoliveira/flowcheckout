@@ -65,7 +65,7 @@ export const hashDocument = (doc) => {
  * fbp e fbc NAO levam hash: ja sao opacos, e aplicar hash neles quebra o
  * casamento. IP e user-agent tambem vao em texto puro, por exigencia da API.
  */
-export function buildUserData({ customer = {}, tracking = {}, orderId }) {
+export function buildUserData({ customer = {}, tracking = {}, address = null, orderId }) {
   const [primeiro, ...resto] = String(customer.name || '').trim().split(/\s+/);
 
   const data = {
@@ -81,6 +81,16 @@ export function buildUserData({ customer = {}, tracking = {}, orderId }) {
     client_user_agent: tracking.userAgent || undefined,
     fbp: tracking.fbp || undefined,
     fbc: tracking.fbc || undefined,
+
+    // Endereco: so entra quando veio de consulta de CEP. Cidade e estado
+    // digitados errado casam errado e derrubam a nota.
+    zp: address?.zip ? [sha256(String(address.zip).replace(/\D/g, ''))] : undefined,
+    ct: address?.city ? [sha256(semAcento(address.city).replace(/\s/g, ''))] : undefined,
+    st: address?.state ? [sha256(clean(address.state))] : undefined,
+
+    // Identificadores de clique de outros formatos de anuncio. Vao sem hash.
+    ctwa_clid: tracking.ctwaClid || undefined,
+    lead_id: tracking.leadId || undefined,
   };
 
   // Campo vazio conta contra a nota: melhor omitir do que mandar nulo.
@@ -110,6 +120,11 @@ export function matchSignals(userData) {
     client_ip_address: 'IP',
     client_user_agent: 'Navegador',
     country: 'País',
+    zp: 'CEP',
+    ct: 'Cidade',
+    st: 'Estado',
+    ctwa_clid: 'Clique do WhatsApp',
+    lead_id: 'Lead Ads',
   };
 
   const presentes = Object.keys(pesos).filter((k) => userData[k]);

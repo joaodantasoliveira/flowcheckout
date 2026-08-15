@@ -176,6 +176,9 @@ const tracking = (() => {
     utmCampaign: params.get('utm_campaign'),
     utmContent: params.get('utm_content'),
     utmTerm: params.get('utm_term'),
+    // Anuncio que abre WhatsApp e Lead Ads trazem o proprio id de clique.
+    ctwaClid: params.get('ctwa_clid'),
+    leadId: params.get('lead_id'),
   };
 })();
 
@@ -271,6 +274,9 @@ async function loadProduct() {
 
   if (product.headline) $('#page-title').textContent = product.headline;
   if (product.showSecuritySeal === false) $('#security-seal').hidden = true;
+
+  // Campo de CEP so aparece quando o produto pede.
+  $('#zip-field').hidden = !product.askZip;
 
   $$('[data-price]').forEach((el) => (el.textContent = product.amountFormatted));
   $$('[data-price-inline]').forEach((el) => (el.textContent = product.amountFormatted));
@@ -369,6 +375,34 @@ function setStep(current) {
 $('#document').addEventListener('input', (e) => {
   e.target.value = maskDocument(e.target.value);
 });
+
+/**
+ * CEP: máscara e consulta.
+ * Mostrar a cidade confirma ao comprador que o campo fez sentido — sem isso
+ * um campo a mais no checkout é só atrito.
+ */
+$('#zip').addEventListener('input', async (e) => {
+  const d = onlyDigits(e.target.value).slice(0, 8);
+  e.target.value = d.length > 5 ? `${d.slice(0, 5)}-${d.slice(5)}` : d;
+
+  const hint = $('#zip-hint');
+  if (d.length !== 8) {
+    hint.textContent = '';
+    return;
+  }
+
+  hint.textContent = 'Buscando…';
+
+  try {
+    const res = await fetch(`https://viacep.com.br/ws/${d}/json/`);
+    const json = await res.json();
+    hint.textContent = json?.erro ? 'CEP não encontrado.' : `${json.localidade} — ${json.uf}`;
+    hint.classList.toggle('is-ok', !json?.erro);
+  } catch {
+    // Sem consulta o pedido segue: o CEP em si já é o sinal principal.
+    hint.textContent = '';
+  }
+});
 $('#phone').addEventListener('input', (e) => {
   e.target.value = maskPhone(e.target.value);
 });
@@ -426,6 +460,7 @@ $('#checkout-form').addEventListener('submit', async (event) => {
         email: $('#email').value,
         document: onlyDigits($('#document').value),
         phone: onlyDigits($('#phone').value),
+        zip: onlyDigits($('#zip').value),
         tracking,
       }),
     });

@@ -26,6 +26,15 @@ async function comMigracao004(fn) {
       throw erro;
     }
 
+    if (/ask_zip|customer_zip/.test(err?.message || '')) {
+      const erro = new Error(
+        'O campo de CEP precisa da migração 007. ' +
+          'Rode supabase/migrations/007-sinais-extras.sql no SQL Editor do Supabase.'
+      );
+      erro.status = 422;
+      throw erro;
+    }
+
     if (/method_(pix|card)|checkout_headline|show_security_seal/.test(err?.message || '')) {
       const erro = new Error(
         'A personalização do checkout precisa da migração 005. ' +
@@ -49,6 +58,7 @@ function checkoutColumns(patch = {}) {
     if (checkout.methods.pix !== undefined) row.method_pix = Boolean(checkout.methods.pix);
     if (checkout.methods.card !== undefined) row.method_card = Boolean(checkout.methods.card);
   }
+  if (checkout.askZip !== undefined) row.ask_zip = Boolean(checkout.askZip);
   if (checkout.headline !== undefined) {
     row.checkout_headline = String(checkout.headline).trim() || null;
   }
@@ -102,6 +112,7 @@ const fromRow = (row) =>
         pix: row.method_pix ?? true,
         card: row.method_card ?? false,
       },
+      askZip: row.ask_zip ?? false,
       headline: row.checkout_headline || '',
       showSecuritySeal: row.show_security_seal ?? true,
     },

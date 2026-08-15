@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 
 import { config } from './config.js';
+import { lookupCep } from './cep.js';
 import { buildUserData, matchSignals, sendEvent } from './meta-capi.js';
 import { getPixelWithToken, markPixelEvent } from './pixels.js';
 
@@ -41,6 +42,9 @@ export function extractTracking(body = {}, req) {
   return {
     fbp,
     fbc,
+    // Cliques de outros formatos: anuncio que abre WhatsApp e Lead Ads.
+    ctwaClid: limite(t.ctwaClid, 200),
+    leadId: limite(t.leadId, 100),
     externalId: limite(t.externalId, 100),
     eventSourceUrl: limite(t.pageUrl, 500) || `${config.publicUrl}/`,
     utm: {
@@ -77,9 +81,15 @@ export async function trackEvent({ order, product, eventName, eventTime }) {
 
     const tracking = order.tracking || {};
 
+    // Cidade e estado saem da consulta de CEP, nao do que o comprador
+    // digitou. Feito aqui e nao na criacao do pedido para nao somar
+    // latencia ao momento em que o cliente esta esperando o QR Code.
+    const address = order.customerZip ? await lookupCep(order.customerZip) : null;
+
     const userData = buildUserData({
       customer: order.customer,
       tracking: { ...tracking, ip: tracking.ip, userAgent: tracking.userAgent },
+      address,
       orderId: order.id,
     });
 

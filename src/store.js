@@ -30,6 +30,7 @@ export const fromRow = (row) =>
       document: row.customer_document,
       phone: row.customer_phone,
     },
+    customerZip: row.customer_zip || null,
 
     status: row.status,
     paid: row.paid,
@@ -76,7 +77,7 @@ function toRow(patch) {
   return row;
 }
 
-export async function createOrder({ product, customer, amountCents, gateway, tracking, ip, userAgent }) {
+export async function createOrder({ product, customer, amountCents, gateway, tracking, zip, ip, userAgent }) {
   const id = `${Date.now().toString(36)}-${crypto.randomBytes(6).toString('hex')}`;
 
   const row = await dbInsert('orders', {
@@ -90,6 +91,7 @@ export async function createOrder({ product, customer, amountCents, gateway, tra
     customer_email: customer.email,
     customer_document: customer.document,
     customer_phone: customer.phone,
+    customer_zip: zip || null,
     status: 'PENDENTE',
     paid: false,
     fulfilled: false,

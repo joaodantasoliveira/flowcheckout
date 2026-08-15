@@ -1,5 +1,6 @@
 import { Router } from 'express';
 
+import { isValidCep } from '../cep.js';
 import { config } from '../config.js';
 import { GatewayError } from '../gateways/index.js';
 import { publicOrder, syncOrderWithGateway } from '../orders.js';
@@ -51,6 +52,7 @@ checkoutRouter.get('/product', async (req, res, next) => {
       pixelId: product.pixelId ? await getPixelPublicId(product.pixelId) : null,
       headline: product.checkout.headline,
       showSecuritySeal: product.checkout.showSecuritySeal,
+      askZip: product.checkout.askZip,
       // Textos da tela de confirmação. Vazio faz o front usar o padrão.
       success: product.success,
       methods: {
@@ -77,6 +79,14 @@ checkoutRouter.post('/pix', createLimiter, async (req, res, next) => {
     if (!product) return res.status(404).json({ error: 'Produto não encontrado.' });
 
     const { errors, data } = validateCheckoutPayload(req.body);
+
+    // CEP so e exigido quando o produto pede. Campo a mais custa conversao,
+    // entao a troca e escolha do dono da oferta.
+    const zip = String(req.body?.zip || '').replace(/[^0-9]/g, '');
+    if (product.checkout.askZip && !isValidCep(zip)) {
+      errors.zip = 'Informe um CEP válido (8 dígitos).';
+    }
+
     if (Object.keys(errors).length) {
       return res.status(422).json({ error: 'Revise os dados informados.', fields: errors });
     }
@@ -98,6 +108,7 @@ checkoutRouter.post('/pix', createLimiter, async (req, res, next) => {
       amountCents,
       gateway: gateway.id,
       tracking,
+      zip: zip || null,
       ip: req.ip,
       userAgent: req.get('user-agent') || null,
     });
