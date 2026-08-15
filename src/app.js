@@ -22,6 +22,10 @@ app.disable('x-powered-by');
 
 app.use(express.json({ limit: '32kb' }));
 
+// navigator.sendBeacon manda text/plain para não disparar preflight de CORS.
+// É como a página de vendas, em outro domínio, reporta a visita.
+app.use(express.text({ limit: '8kb', type: 'text/plain' }));
+
 app.use((req, res, next) => {
   res.set({
     'X-Content-Type-Options': 'nosniff',

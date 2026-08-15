@@ -296,7 +296,9 @@ function registrarVisita(productId) {
   const chave = `_gc_visit_${productId}`;
   if (sessionStorage.getItem(chave)) return;
 
-  let sessionId = localStorage.getItem('_gc_sid');
+  // Usa o mesmo id que a landing gerou: assim a visita de lá e a de cá são
+  // a MESMA pessoa, e dá para medir quantos clicaram no botão de compra.
+  let sessionId = tracking.externalId || localStorage.getItem('_gc_sid');
   if (!sessionId) {
     sessionId = `s.${Date.now().toString(36)}.${Math.random().toString(36).slice(2, 12)}`;
     localStorage.setItem('_gc_sid', sessionId);
@@ -307,7 +309,7 @@ function registrarVisita(productId) {
   fetch('/api/checkout/view', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ productId, sessionId, tracking }),
+    body: JSON.stringify({ productId, sessionId, source: 'checkout', tracking }),
     keepalive: true,
   }).catch(() => {});
 }

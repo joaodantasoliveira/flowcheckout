@@ -74,21 +74,52 @@ checkoutRouter.get('/product', async (req, res, next) => {
 });
 
 /**
- * Registra a visita na página. Topo do funil.
- * Responde 204 sempre: se o contador falhar, o comprador nem fica sabendo.
+ * Registra a visita. Topo do funil.
+ *
+ * Aceita chamada de OUTRO dominio, porque a pagina de vendas fica no
+ * dominio do cliente. Duas escolhas que evitam dor de cabeca com CORS:
+ *
+ * 1. `navigator.sendBeacon` envia como text/plain, que e um tipo "simples"
+ *    e nao dispara requisicao de preflight. Por isso aceitamos texto puro
+ *    alem de JSON.
+ * 2. Origem liberada para qualquer site: e um contador sem credencial e
+ *    sem resposta util. O que protege de inflagem e o rate limit e o
+ *    unique por sessao, nao a origem.
  */
+checkoutRouter.options('/view', (req, res) => {
+  res.set({
+    'Access-Control-Allow-Origin': '*',
+    'Access-Control-Allow-Methods': 'POST, OPTIONS',
+    'Access-Control-Allow-Headers': 'Content-Type',
+    'Access-Control-Max-Age': '86400',
+  });
+  res.status(204).end();
+});
+
 checkoutRouter.post('/view', viewLimiter, async (req, res) => {
+  res.set('Access-Control-Allow-Origin', '*');
   res.status(204).end();
 
   try {
-    const productId = String(req.body?.productId || '').slice(0, 80);
-    const sessionId = String(req.body?.sessionId || '').slice(0, 60);
+    // sendBeacon manda text/plain; o express.json() não parseia isso.
+    let body = req.body;
+    if (typeof body === 'string') {
+      try {
+        body = JSON.parse(body);
+      } catch {
+        return;
+      }
+    }
+
+    const productId = String(body?.productId || '').slice(0, 80);
+    const sessionId = String(body?.sessionId || '').slice(0, 60);
     if (!productId || !sessionId) return;
 
     await recordPageView({
       productId,
       sessionId,
-      tracking: extractTracking(req.body, req),
+      source: body?.source === 'landing' ? 'landing' : 'checkout',
+      tracking: extractTracking(body, req),
     });
   } catch {
     // Silêncio proposital: já respondemos, e visita não vale um log de erro.

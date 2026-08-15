@@ -138,16 +138,27 @@ export async function trackEvent({ order, product, eventName, eventTime }) {
  * que esta em outro dominio. E o `external_id` e o que costura o visitante
  * da landing com o comprador do checkout.
  */
-export function buildLandingSnippet({ pixel, checkoutUrl }) {
+export function buildLandingSnippet({ pixel, checkoutUrl, product = null }) {
   const base = checkoutUrl || config.publicUrl;
   const host = new URL(base).host;
 
-  return `<!-- GoCheckout · rastreamento Meta (${pixel.name}) -->
-<!-- Substitui o pixel padrão do Meta. Cole antes de </head> -->
+  const cabecalho = product
+    ? `<!-- GoCheckout · rastreamento (${pixel.name} · ${product.name}) -->`
+    : `<!-- GoCheckout · rastreamento Meta (${pixel.name}) -->`;
+
+  const avisoProduto = product
+    ? ''
+    : `<!-- Gerado sem produto: a visita na página de vendas NÃO será contada.
+     Para contar, pegue o código em Produtos → UTM do anúncio. -->\n`;
+
+  return `${cabecalho}
+${avisoProduto}<!-- Substitui o pixel padrão do Meta. Cole antes de </head> -->
 <script>
 (function (w, d) {
   var PIXEL_ID = '${pixel.pixelId}';
   var CHECKOUT_HOST = '${host}';
+  var CHECKOUT_URL = '${base}';
+  var PRODUTO = ${product ? `'${product.id}'` : 'null'};
   var ANO = 60 * 60 * 24 * 365;
 
   /* ---- pixel padrão do Meta ---- */
@@ -193,6 +204,41 @@ export function buildLandingSnippet({ pixel, checkoutUrl }) {
 
   fbq('init', PIXEL_ID, { external_id: extId });
   fbq('track', 'PageView');
+
+  /* ---- conta a visita nesta página de vendas ----
+     sendBeacon envia como text/plain, que não dispara preflight de CORS —
+     por isso funciona de um domínio para o outro sem configuração.
+     O mesmo extId identifica a pessoa lá no checkout, então dá para ver
+     quantos dos que viram a oferta chegaram a abrir o checkout. */
+  if (PRODUTO) {
+    try {
+      var visita = JSON.stringify({
+        productId: PRODUTO,
+        sessionId: extId,
+        source: 'landing',
+        tracking: {
+          fbp: ler('_fbp'), fbc: ler('_fbc'), externalId: extId,
+          pageUrl: location.href,
+          utmSource: params.get('utm_source'),
+          utmMedium: params.get('utm_medium'),
+          utmCampaign: params.get('utm_campaign'),
+          utmContent: params.get('utm_content'),
+          utmTerm: params.get('utm_term')
+        }
+      });
+
+      var alvo = CHECKOUT_URL + '/api/checkout/view';
+
+      if (navigator.sendBeacon) {
+        navigator.sendBeacon(alvo, new Blob([visita], { type: 'text/plain' }));
+      } else {
+        fetch(alvo, {
+          method: 'POST', mode: 'no-cors', keepalive: true,
+          headers: { 'Content-Type': 'text/plain' }, body: visita
+        }).catch(function () {});
+      }
+    } catch (e) {}
+  }
 
   /* ---- carimba os links do checkout ----
      Cookie não atravessa domínio: os identificadores viajam na URL. */

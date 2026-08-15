@@ -225,6 +225,9 @@ adminRouter.get(
     }
 
     /* ---------- funil: quem chegou até onde ---------- */
+    const visitasLanding = (views || []).filter((v) => v.source === 'landing').length;
+    const visitasCheckout = (views || []).filter((v) => v.source !== 'landing').length;
+
     const iniciados = allOrders.length;
     const comPix = allOrders.filter((o) => o.gatewayTransactionId).length;
     const pagos = allOrders.filter((o) => o.paid).length;
@@ -314,8 +317,11 @@ adminRouter.get(
       },
       // views === null significa migracao 008 pendente: some a etapa em vez
       // de mostrar zero, que pareceria queda de 100% no topo.
+      // Etapa some quando nao ha dado, em vez de mostrar zero — zero no
+      // topo pareceria queda de 100% e assustaria sem motivo.
       funnel: [
-        ...(views === null ? [] : [{ label: 'Visitas na página', value: views.length }]),
+        ...(visitasLanding ? [{ label: 'Visita na página de vendas', value: visitasLanding }] : []),
+        ...(visitasCheckout ? [{ label: 'Visita no checkout', value: visitasCheckout }] : []),
         { label: 'Checkout iniciado', value: iniciados },
         { label: 'PIX gerado', value: comPix },
         { label: 'Venda', value: pagos },
@@ -411,6 +417,29 @@ adminRouter.delete(
       message: result.deleted
         ? 'Produto excluído.'
         : 'Produto tem vendas registradas e foi desativado em vez de excluído, para preservar o histórico.',
+    });
+  })
+);
+
+
+/** Código da landing já amarrado a este produto — conta a visita de lá. */
+adminRouter.get(
+  '/api/products/:id/snippet',
+  wrap(async (req, res) => {
+    const product = await getProduct(req.params.id);
+    if (!product) return res.status(404).json({ error: 'Produto não encontrado.' });
+
+    if (!product.pixelId) {
+      return res.status(422).json({
+        error: 'Escolha um pixel para este produto antes de gerar o código.',
+      });
+    }
+
+    const pixel = await getPixel(product.pixelId);
+    if (!pixel) return res.status(422).json({ error: 'O pixel deste produto não existe mais.' });
+
+    res.json({
+      snippet: buildLandingSnippet({ pixel, checkoutUrl: config.publicUrl, product }),
     });
   })
 );

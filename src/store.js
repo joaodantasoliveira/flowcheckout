@@ -268,26 +268,44 @@ export async function listOrdersForStats({ limit = 20000 } = {}) {
  *
  * Nunca lanca: contador de funil quebrado nao pode impedir alguem de comprar.
  */
-export async function recordPageView({ productId, sessionId, tracking }) {
+export async function recordPageView({ productId, sessionId, source = 'checkout', tracking }) {
   try {
     await dbUpsert(
       'page_views',
-      { product_id: productId, session_id: sessionId, tracking: tracking || null },
-      { onConflict: 'product_id,session_id' }
+      {
+        product_id: productId,
+        session_id: sessionId,
+        source: source === 'landing' ? 'landing' : 'checkout',
+        tracking: tracking || null,
+      },
+      { onConflict: 'product_id,session_id,source' }
     );
     return true;
   } catch (err) {
+    // Migração 009 pendente: grava sem `source` para não perder a visita.
+    if (/source|page_views_sessao_origem_unica/.test(err?.message || '')) {
+      try {
+        await dbUpsert(
+          'page_views',
+          { product_id: productId, session_id: sessionId, tracking: tracking || null },
+          { onConflict: 'product_id,session_id' }
+        );
+        return true;
+      } catch {
+        return false;
+      }
+    }
     if (/page_views/.test(err?.message || '')) return false; // migração 008 pendente
     console.error('[visitas] falha ao registrar:', err.message);
     return false;
   }
 }
 
-/** Visitas do período, com origem — alimenta o topo do funil. */
+/** Visitas do período, separadas por origem — alimentam o topo do funil. */
 export async function listPageViews({ since }) {
   try {
     const rows = await dbSelect('page_views', {
-      select: 'product_id,session_id,created_at,tracking',
+      select: 'product_id,session_id,source,created_at,tracking',
       filters: { created_at: `gte.${new Date(since).toISOString()}` },
       limit: 50000,
     });
@@ -295,6 +313,7 @@ export async function listPageViews({ since }) {
     return rows.map((row) => ({
       productId: row.product_id,
       sessionId: row.session_id,
+      source: row.source || 'checkout',
       createdAt: new Date(row.created_at).getTime(),
       tracking: row.tracking || {},
     }));

@@ -245,12 +245,19 @@ function renderFunnel(steps, gateways) {
      funil, e o tom mais fechado dá peso a ela. */
   const TONS = [
     { fundo: '#E5E1EE', texto: '#2B303A' },
+    { fundo: '#DCDCB4', texto: '#2B303A' },
     { fundo: '#D2D68D', texto: '#2B303A' },
     { fundo: '#4FBF83', texto: '#12301F' },
     { fundo: '#157145', texto: '#E5E1EE' },
   ];
 
-  const tomDe = (i) => TONS[Math.min(i, TONS.length - 1)];
+  /* Com menos etapas que tons, pega das pontas para fora: o topo continua
+     claro e a base continua escura, sem espremer tudo num tom só. */
+  const tomDe = (i) => {
+    if (steps.length >= TONS.length) return TONS[Math.min(i, TONS.length - 1)];
+    const passo = (TONS.length - 1) / Math.max(1, steps.length - 1);
+    return TONS[Math.round(i * passo)];
+  };
 
   const trapezios = steps
     .map((s, i) => {
@@ -570,7 +577,31 @@ function openUtmModal(product) {
   $('#utm-link').value = base;
   $('#utm-direct').value = `${base}&${META_PARAMS}`;
 
+  // O código só existe se o produto tiver pixel escolhido.
+  carregarSnippetDoProduto(product);
+
   $('#utm-modal').hidden = false;
+}
+
+/** Busca o código da landing amarrado a este produto. */
+async function carregarSnippetDoProduto(product) {
+  const caixa = $('#utm-snippet');
+  const aviso = $('#utm-snippet-aviso');
+
+  caixa.value = '';
+  aviso.hidden = true;
+
+  try {
+    const { snippet } = await api(`/products/${encodeURIComponent(product.id)}/snippet`);
+    caixa.value = snippet;
+    caixa.hidden = false;
+    $('#utm-snippet-acoes').hidden = false;
+  } catch (err) {
+    caixa.hidden = true;
+    $('#utm-snippet-acoes').hidden = true;
+    aviso.textContent = err.message;
+    aviso.hidden = false;
+  }
 }
 
 $('#utm-modal').addEventListener('click', async (event) => {
