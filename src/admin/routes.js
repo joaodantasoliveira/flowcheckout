@@ -24,8 +24,6 @@ import {
 } from '../products.js';
 import { rateLimit } from '../rate-limit.js';
 import {
-  countOrders,
-  countOrdersByStatus,
   getOrder,
   listInfractionOrders,
   listOrders,
@@ -309,6 +307,347 @@ adminRouter.get(
       topProducts: [...byProduct.values()].sort((a, b) => b.cents - a.cents).slice(0, 5),
       recent: recent.map((o) => orderView(o)),
     });
+  })
+);
+
+/* ---------------- produtos ---------------- */
+
+adminRouter.get(
+  '/api/products',
+  wrap(async (req, res) => {
+    const [products, paid] = await Promise.all([listProducts(), listPaidOrders()]);
+
+    res.json(
+      products.map((product) => {
+        const sales = paid.filter((o) => o.productId === product.id);
+        return {
+          ...product,
+          priceFormatted: formatBRL(product.priceCents),
+          salesCount: sales.length,
+          revenueCents: sales.reduce((total, o) => total + o.amountCents, 0),
+          checkoutUrl: `/?produto=${encodeURIComponent(product.id)}`,
+        };
+      })
+    );
+  })
+);
+
+adminRouter.post(
+  '/api/products',
+  wrap(async (req, res) => {
+    const errors = validateProductInput(req.body);
+    if (Object.keys(errors).length) {
+      return res.status(422).json({ error: 'Revise os campos.', fields: errors });
+    }
+
+    const product = await createProduct(req.body);
+    await audit('produto.criado', {
+      adminId: req.admin.id,
+      ip: req.ip,
+      detail: { id: product.id, priceCents: product.priceCents },
+    });
+
+    res.status(201).json(product);
+  })
+);
+
+adminRouter.patch(
+  '/api/products/:id',
+  wrap(async (req, res) => {
+    const product = await getProduct(req.params.id);
+    if (!product) return res.status(404).json({ error: 'Produto não encontrado.' });
+
+    const errors = validateProductInput(req.body, { partial: true });
+    if (Object.keys(errors).length) {
+      return res.status(422).json({ error: 'Revise os campos.', fields: errors });
+    }
+
+    const updated = await updateProduct(product.id, req.body);
+    await audit('produto.editado', {
+      adminId: req.admin.id,
+      ip: req.ip,
+      detail: { id: product.id, previousPrice: product.priceCents, priceCents: updated.priceCents },
+    });
+
+    res.json(updated);
+  })
+);
+
+adminRouter.delete(
+  '/api/products/:id',
+  wrap(async (req, res) => {
+    const product = await getProduct(req.params.id);
+    if (!product) return res.status(404).json({ error: 'Produto não encontrado.' });
+
+    const result = await deleteProduct(product.id);
+    await audit(result.deleted ? 'produto.excluido' : 'produto.desativado', {
+      adminId: req.admin.id,
+      ip: req.ip,
+      detail: { id: product.id },
+    });
+
+    res.json({
+      ...result,
+      message: result.deleted
+        ? 'Produto excluído.'
+        : 'Produto tem vendas registradas e foi desativado em vez de excluído, para preservar o histórico.',
+    });
+  })
+);
+
+/* ---------------- vendas ---------------- */
+
+adminRouter.get(
+  '/api/orders',
+  wrap(async (req, res) => {
+    const { orders, pagination } = await listOrders({
+      status: String(req.query.status || '').toUpperCase(),
+      query: String(req.query.q || '').trim(),
+      page: Math.max(1, Number(req.query.page) || 1),
+    });
+
+    res.json({ data: orders.map((o) => orderView(o)), pagination });
+  })
+);
+
+adminRouter.get(
+  '/api/orders/:id',
+  wrap(async (req, res) => {
+    const order = await getOrder(req.params.id);
+    if (!order) return res.status(404).json({ error: 'Pedido não encontrado.' });
+    res.json(orderView(order));
+  })
+);
+
+/** Exibe os dados pessoais sem mascara. Toda exibicao fica registrada. */
+adminRouter.post(
+  '/api/orders/:id/reveal',
+  wrap(async (req, res) => {
+    const order = await getOrder(req.params.id);
+    if (!order) return res.status(404).json({ error: 'Pedido não encontrado.' });
+
+    await audit('dados_pessoais.exibidos', {
+      adminId: req.admin.id,
+      ip: req.ip,
+      detail: { orderId: order.id },
+    });
+
+    res.json(orderView(order, { unmasked: true }));
+  })
+);
+
+/** Forca uma reconsulta ao gateway — util quando o webhook nao chegou. */
+adminRouter.post(
+  '/api/orders/:id/recheck',
+  wrap(async (req, res) => {
+    const order = await getOrder(req.params.id);
+    if (!order) return res.status(404).json({ error: 'Pedido não encontrado.' });
+
+    const synced = await syncOrderWithGateway(order, { force: true });
+    await audit('pedido.reconsultado', {
+      adminId: req.admin.id,
+      ip: req.ip,
+      detail: { orderId: order.id },
+    });
+
+    res.json(orderView(synced));
+  })
+);
+
+/** Exportacao CSV — leva dados pessoais completos, por isso e auditada. */
+adminRouter.get(
+  '/api/orders/export/csv',
+  wrap(async (req, res) => {
+    const orders = await listPaidOrders();
+
+    await audit('vendas.exportadas', {
+      adminId: req.admin.id,
+      ip: req.ip,
+      detail: { count: orders.length },
+    });
+
+    const escape = (value) => {
+      const text = String(value ?? '');
+      // Neutraliza formula injection: =, +, -, @ no inicio viram texto no Excel.
+      const safe = /^[=+\-@\t\r]/.test(text) ? `'${text}` : text;
+      return `"${safe.replace(/"/g, '""')}"`;
+    };
+
+    const header = [
+      'pedido', 'data', 'produto', 'valor', 'status',
+      'nome', 'email', 'documento', 'telefone', 'e2e', 'transacao_gateway',
+    ];
+
+    const rows = orders.map((o) =>
+      [
+        o.id,
+        new Date(o.paidAt || o.createdAt).toISOString(),
+        o.productName,
+        (o.amountCents / 100).toFixed(2).replace('.', ','),
+        o.status,
+        o.customer.name,
+        o.customer.email,
+        o.customer.document,
+        o.customer.phone,
+        o.endToEndId || '',
+        o.gatewayTransactionId || '',
+      ].map(escape).join(';')
+    );
+
+    // BOM para o Excel abrir os acentos corretamente.
+    const csv = `﻿${header.map(escape).join(';')}\n${rows.join('\n')}`;
+
+    res.set({
+      'Content-Type': 'text/csv; charset=utf-8',
+      'Content-Disposition': `attachment; filename="vendas-${new Date().toISOString().slice(0, 10)}.csv"`,
+    });
+    res.send(csv);
+  })
+);
+
+/* ---------------- gateways de pagamento ---------------- */
+
+adminRouter.get(
+  '/api/gateways',
+  wrap(async (req, res) => res.json(await getGatewaysStatus()))
+);
+
+/** Troca o gateway ativo. Só permite se ele responder com as credenciais salvas. */
+adminRouter.put(
+  '/api/gateways/active',
+  wrap(async (req, res) => {
+    const gatewayId = String(req.body?.gateway || '').trim();
+    const gateway = getGateway(gatewayId);
+    if (!gateway) return res.status(422).json({ error: 'Gateway desconhecido.' });
+
+    const resolved = await getCredentials(gatewayId);
+    if (!resolved) {
+      return res.status(422).json({
+        error: `Cadastre as credenciais da ${gateway.label} antes de ativá-la.`,
+      });
+    }
+
+    // Ativar um gateway que não responde derrubaria todas as vendas de uma vez.
+    try {
+      await gateway.testCredentials(resolved.credentials);
+    } catch (err) {
+      return res.status(400).json({
+        error: `A ${gateway.label} recusou as credenciais salvas: ${err.message}. Gateway não trocado.`,
+      });
+    }
+
+    await setActiveGateway(gatewayId, req.admin.id);
+    await audit('gateway.ativo_alterado', {
+      adminId: req.admin.id,
+      ip: req.ip,
+      detail: { gateway: gatewayId },
+    });
+
+    res.json({ ok: true, ...(await getGatewaysStatus()) });
+  })
+);
+
+/**
+ * Campo secreto em branco significa "mantenha o atual" — assim dá para
+ * corrigir só o Client ID sem redigitar o segredo.
+ */
+async function resolveFields(gateway, body) {
+  const current = (await getCredentials(gateway.id))?.credentials || {};
+  const values = {};
+  let reusedSecret = false;
+
+  for (const field of gateway.credentialFields) {
+    const typed = String(body?.[field.key] ?? '').trim();
+
+    if (typed) {
+      values[field.key] = typed;
+    } else if (field.secret && current[field.key]) {
+      values[field.key] = current[field.key];
+      reusedSecret = true;
+    } else {
+      values[field.key] = '';
+    }
+  }
+
+  const missing = gateway.credentialFields.filter((f) => !values[f.key]).map((f) => f.label);
+
+  return { values, missing, reusedSecret };
+}
+
+/** Testa credenciais sem gravar: chave errada não chega ao banco. */
+adminRouter.post(
+  '/api/gateways/:id/test',
+  wrap(async (req, res) => {
+    const gateway = getGateway(req.params.id);
+    if (!gateway) return res.status(404).json({ error: 'Gateway desconhecido.' });
+
+    const { values, missing } = await resolveFields(gateway, req.body);
+    if (missing.length) {
+      return res.status(422).json({ error: `Informe: ${missing.join(', ')}.` });
+    }
+
+    try {
+      const account = await gateway.testCredentials(values);
+      await audit('gateway.credenciais_testadas', {
+        adminId: req.admin.id,
+        ip: req.ip,
+        detail: { gateway: gateway.id, ok: true },
+      });
+      res.json({ ok: true, account });
+    } catch (err) {
+      await audit('gateway.credenciais_testadas', {
+        adminId: req.admin.id,
+        ip: req.ip,
+        detail: { gateway: gateway.id, ok: false },
+      });
+      res.status(400).json({
+        error:
+          err.status === 401
+            ? `A ${gateway.label} recusou essas credenciais.`
+            : `Não foi possível validar: ${err.message}`,
+      });
+    }
+  })
+);
+
+adminRouter.put(
+  '/api/gateways/:id/credentials',
+  wrap(async (req, res) => {
+    const gateway = getGateway(req.params.id);
+    if (!gateway) return res.status(404).json({ error: 'Gateway desconhecido.' });
+
+    const { values, missing, reusedSecret } = await resolveFields(gateway, req.body);
+    if (missing.length) {
+      return res.status(422).json({ error: `Informe: ${missing.join(', ')}.` });
+    }
+
+    // Só grava o que o gateway aceitou. Salvar chave inválida deixaria a loja
+    // sem conseguir gerar PIX até alguém perceber.
+    try {
+      await gateway.testCredentials(values);
+    } catch (err) {
+      return res.status(400).json({
+        error:
+          err.status === 401
+            ? `A ${gateway.label} recusou essas credenciais. Nada foi salvo.`
+            : `Não foi possível validar: ${err.message}. Nada foi salvo.`,
+      });
+    }
+
+    try {
+      await saveCredentials(gateway.id, values, req.admin.id);
+    } catch (err) {
+      return res.status(500).json({ error: err.message });
+    }
+
+    await audit('gateway.credenciais_alteradas', {
+      adminId: req.admin.id,
+      ip: req.ip,
+      // Nunca registramos a credencial em si — só que ela mudou e por quem.
+      detail: { gateway: gateway.id, secretTrocado: !reusedSecret },
+    });
+
+    res.json({ ok: true, ...(await getGatewaysStatus()) });
   })
 );
 
